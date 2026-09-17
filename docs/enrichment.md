@@ -247,6 +247,10 @@ fig = plot_umap_enrichment(
     fontsize_range=(6, 14),
     title_left="UMAP clustering",
     title_right=None,
+    show_centroids=True,     # mark each cluster centroid
+    centroid_marker="o",     # any matplotlib marker; "o" is a filled circle
+    centroid_size=26,
+    centroid_color="black",
 )
 fig.savefig("umap_enrichment.pdf")
 ```
@@ -269,6 +273,9 @@ How the layout works:
   then widened to cover anything that had to go outside, so nothing is clipped.
 - Labels that cannot be placed anywhere are dropped rather than drawn on top of
   each other. `verbose=True` reports how many.
+- The centroid markers count as obstacles, so `show_centroids=False` both hides
+  them and lets the labels sit closer to the centre. The reserved space scales
+  with `centroid_size`.
 
 If the figure is crowded, lower `top_n`, raise `figsize`, or shorten labels with
 `max_label_chars`.
@@ -278,7 +285,12 @@ A companion figure shows where the labels are anchored:
 ```python
 from togoid.enrichment import plot_umap_centroids
 
-plot_umap_centroids(embedding).savefig("umap_centroids.pdf")
+plot_umap_centroids(
+    embedding,
+    centroid_marker="o",   # filled circle, as in the enrichment panel
+    centroid_size=80,
+    show_labels=True,      # write the cluster label beside each centroid
+).savefig("umap_centroids.pdf")
 ```
 
 ## Single-cell adapters

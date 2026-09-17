@@ -459,6 +459,9 @@ def plot_umap_enrichment(
     title_left: str = "UMAP clustering",
     title_right: Optional[str] = None,
     show_centroids: bool = True,
+    centroid_marker: str = "o",
+    centroid_size: float = 26.0,
+    centroid_color: str = "black",
     legend: bool = True,
     verbose: bool = False,
 ):
@@ -490,6 +493,10 @@ def plot_umap_enrichment(
         title_left: Title of the left panel.
         title_right: Title of the right panel; defaults to a generated one.
         show_centroids: Mark cluster centroids on the right panel.
+        centroid_marker: Matplotlib marker for the centroids; ``"o"`` (a filled
+            circle) by default.
+        centroid_size: Centroid marker area in points squared.
+        centroid_color: Centroid marker colour.
         legend: Draw the cluster legend on the left panel.
         verbose: Print how many labels were placed.
 
@@ -570,18 +577,20 @@ def plot_umap_enrichment(
     # and let the label layout treat them as already-placed text.
     reserved: List[BBox] = []
     if show_centroids:
-        marker_half = span * 0.012
+        # Reserve a box a little larger than the marker itself, scaled with the
+        # requested size so labels keep clear of it.
+        marker_half = span * 0.010 * max(1.0, (centroid_size / 26.0) ** 0.5)
         for cluster, centroid in centroids.items():
             if not selected.get(cluster):
                 continue
             ax_right.scatter(
                 centroid["x"],
                 centroid["y"],
-                marker="x",
-                c="black",
-                s=36,
-                alpha=0.6,
-                linewidths=1.2,
+                marker=centroid_marker,
+                c=centroid_color,
+                s=centroid_size,
+                alpha=0.8,
+                linewidths=0,
                 zorder=5,
             )
             reserved.append(
@@ -638,6 +647,10 @@ def plot_umap_centroids(
     figsize: Tuple[float, float] = (9.0, 8.0),
     point_size: float = 8.0,
     title: str = "UMAP with cluster centroids",
+    centroid_marker: str = "o",
+    centroid_size: float = 80.0,
+    centroid_color: str = "black",
+    show_labels: bool = True,
 ):
     """
     Draw the embedding with each cluster's centroid marked and labelled.
@@ -654,6 +667,11 @@ def plot_umap_centroids(
         figsize: Figure size in inches.
         point_size: Marker size.
         title: Figure title.
+        centroid_marker: Matplotlib marker for the centroids; ``"o"`` (a filled
+            circle) by default.
+        centroid_size: Centroid marker area in points squared.
+        centroid_color: Centroid marker colour.
+        show_labels: Write the cluster label beside each centroid.
 
     Returns:
         The matplotlib ``Figure``.
@@ -671,22 +689,23 @@ def plot_umap_centroids(
         ax.scatter(
             centroid["x"],
             centroid["y"],
-            marker="X",
-            c="black",
-            s=90,
+            marker=centroid_marker,
+            c=centroid_color,
+            s=centroid_size,
             zorder=5,
             linewidths=0.8,
             edgecolors="white",
         )
-        ax.text(
-            centroid["x"],
-            centroid["y"],
-            f" {cluster}",
-            fontsize=11,
-            fontweight="bold",
-            va="center",
-            zorder=6,
-        )
+        if show_labels:
+            ax.text(
+                centroid["x"],
+                centroid["y"],
+                f" {cluster}",
+                fontsize=11,
+                fontweight="bold",
+                va="center",
+                zorder=6,
+            )
 
     ax.set_xlabel("UMAP 1", fontsize=12)
     ax.set_ylabel("UMAP 2", fontsize=12)

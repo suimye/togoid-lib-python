@@ -510,10 +510,36 @@ def test_plot_smoke() -> None:
     )
     check(collisions == 0, f"no two labels overlap ({len(boxes)} labels placed)")
 
+    # show_centroids toggles the markers, and frees the space they reserved.
+    with_markers = plot_umap_enrichment(embedding, rows, top_n=4, fdr_cutoff=0.05)
+    without = plot_umap_enrichment(
+        embedding, rows, top_n=4, fdr_cutoff=0.05, show_centroids=False
+    )
+    n_points_with = len(with_markers.axes[1].collections)
+    n_points_without = len(without.axes[1].collections)
+    check(
+        n_points_without < n_points_with,
+        "show_centroids=False drops the centroid markers",
+    )
+    check(
+        len(without.axes[1].texts) == len(with_markers.axes[1].texts),
+        "hiding the centroids still places every label",
+    )
+
+    square = plot_umap_enrichment(
+        embedding, rows, top_n=4, fdr_cutoff=0.05, centroid_marker="s"
+    )
+    check(square is not None, "centroid_marker accepts another marker code")
+
     empty = plot_umap_enrichment(embedding, rows, fdr_cutoff=1e-300)
     check(len(empty.axes) == 2, "handles the case where nothing is significant")
 
     check(plot_umap_centroids(embedding) is not None, "plot_umap_centroids returns a figure")
+    check(
+        len(plot_umap_centroids(embedding, show_labels=False).axes[0].texts)
+        < len(plot_umap_centroids(embedding).axes[0].texts),
+        "plot_umap_centroids(show_labels=False) omits the cluster labels",
+    )
 
     with tempfile.TemporaryDirectory() as directory:
         path = os.path.join(directory, "figure.pdf")

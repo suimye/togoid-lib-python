@@ -38,6 +38,19 @@ def parse_arguments() -> argparse.Namespace:
         "--clusters", default=None, help="Comma-separated cluster IDs to label (default: all)"
     )
     parser.add_argument("--max-label-chars", type=int, default=40, help="Truncate labels beyond this")
+    parser.add_argument(
+        "--no-centroids",
+        action="store_true",
+        help="Do not mark the cluster centroids on the enrichment panel",
+    )
+    parser.add_argument(
+        "--centroid-marker",
+        default="o",
+        help="Matplotlib marker for the centroids (default: o, a filled circle)",
+    )
+    parser.add_argument(
+        "--centroid-size", type=float, default=26.0, help="Centroid marker size (default: 26)"
+    )
     parser.add_argument("--dpi", type=int, default=200, help="Raster resolution for the PNG output")
     parser.add_argument(
         "--formats", default="pdf,png", help="Comma-separated output formats (default: pdf,png)"
@@ -125,7 +138,11 @@ def main() -> int:
     )
 
     # A reference figure showing where the labels will be anchored.
-    fig = plot_umap_centroids(embedding, title="PBMC clusters and centroids")
+    fig = plot_umap_centroids(
+        embedding,
+        title="PBMC clusters and centroids",
+        centroid_marker=args.centroid_marker,
+    )
     save_figure(fig, args.results_dir, "04_umap_centroids", formats, args.dpi)
 
     titles = {
@@ -148,6 +165,9 @@ def main() -> int:
             max_label_chars=args.max_label_chars,
             title_left="PBMC clusters (UMAP)",
             title_right=f"{titles.get(target, target)} (top {args.top_n} per cluster)",
+            show_centroids=not args.no_centroids,
+            centroid_marker=args.centroid_marker,
+            centroid_size=args.centroid_size,
             verbose=True,
         )
         save_figure(
