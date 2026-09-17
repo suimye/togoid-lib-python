@@ -510,20 +510,43 @@ def test_plot_smoke() -> None:
     )
     check(collisions == 0, f"no two labels overlap ({len(boxes)} labels placed)")
 
-    # show_centroids toggles the markers, and frees the space they reserved.
+    # show_centroids only sets the marker opacity: the marker is still drawn and
+    # still reserves its space, so the labels must not move.
     with_markers = plot_umap_enrichment(embedding, rows, top_n=4, fdr_cutoff=0.05)
     without = plot_umap_enrichment(
         embedding, rows, top_n=4, fdr_cutoff=0.05, show_centroids=False
     )
-    n_points_with = len(with_markers.axes[1].collections)
-    n_points_without = len(without.axes[1].collections)
+
+    def centroid_alphas(figure):
+        # The centroid scatters are the ones drawn at zorder 5.
+        return [
+            c.get_alpha()
+            for c in figure.axes[1].collections
+            if c.get_zorder() == 5
+        ]
+
     check(
-        n_points_without < n_points_with,
-        "show_centroids=False drops the centroid markers",
+        len(centroid_alphas(without)) == len(centroid_alphas(with_markers)) > 0,
+        "show_centroids=False still draws the centroid markers",
     )
     check(
-        len(without.axes[1].texts) == len(with_markers.axes[1].texts),
-        "hiding the centroids still places every label",
+        all(a == 0.0 for a in centroid_alphas(without)),
+        "show_centroids=False makes the centroid markers transparent",
+    )
+    check(
+        all(a and a > 0.0 for a in centroid_alphas(with_markers)),
+        "show_centroids=True makes the centroid markers visible",
+    )
+
+    def label_positions(figure):
+        return sorted(
+            (t.get_text(), round(t.get_position()[0], 6), round(t.get_position()[1], 6))
+            for t in figure.axes[1].texts
+        )
+
+    check(
+        label_positions(without) == label_positions(with_markers),
+        "hiding the centroids leaves every label in exactly the same place",
     )
 
     square = plot_umap_enrichment(

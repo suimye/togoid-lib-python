@@ -853,10 +853,12 @@ fig = plot_umap_enrichment(
 fig.savefig("umap_enrichment.pdf")
 ```
 
-The centroid markers are optional: `show_centroids=False` hides them, and the
-labels then move in closer, since the space they reserved is freed. The marker
-itself is any matplotlib marker code — `"o"` (filled circle, the default),
-`"x"`, `"s"`, and so on — with `centroid_size` and `centroid_color` to match.
+`show_centroids=False` hides the markers by drawing them transparently. They are
+still drawn and still reserve their space, so **the labels stay exactly where
+they were** — the two figures differ only in whether you can see the dots. The
+marker itself is any matplotlib marker code — `"o"` (filled circle, the
+default), `"x"`, `"s"`, and so on — with `centroid_size` and `centroid_color` to
+match.
 
 The left panel is the usual cluster UMAP; the right repeats it with each
 cluster's enriched terms written around its centroid, sized by `-log10(p)`.

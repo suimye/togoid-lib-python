@@ -492,7 +492,10 @@ def plot_umap_enrichment(
         padding_fraction: Gap kept between labels, as a fraction of the plot span.
         title_left: Title of the left panel.
         title_right: Title of the right panel; defaults to a generated one.
-        show_centroids: Mark cluster centroids on the right panel.
+        show_centroids: Whether the cluster centroid markers are visible. The
+            markers are drawn either way — transparently when this is False —
+            and always reserve their space, so the label positions are identical
+            with and without them.
         centroid_marker: Matplotlib marker for the centroids; ``"o"`` (a filled
             circle) by default.
         centroid_size: Centroid marker area in points squared.
@@ -573,34 +576,35 @@ def plot_umap_enrichment(
     y_lo, y_hi = ax_right.get_ylim()
     span = max(abs(x_hi - x_lo), abs(y_hi - y_lo))
 
-    # The centroid markers occupy space too, so reserve a box around each one
-    # and let the label layout treat them as already-placed text.
+    # The centroid markers occupy space in the layout whether or not they are
+    # visible: the marker is always drawn and its box always reserved, and
+    # show_centroids only sets the opacity. That way toggling it changes what you
+    # see without moving a single label, so the two figures stay comparable.
     reserved: List[BBox] = []
-    if show_centroids:
-        # Reserve a box a little larger than the marker itself, scaled with the
-        # requested size so labels keep clear of it.
-        marker_half = span * 0.010 * max(1.0, (centroid_size / 26.0) ** 0.5)
-        for cluster, centroid in centroids.items():
-            if not selected.get(cluster):
-                continue
-            ax_right.scatter(
-                centroid["x"],
-                centroid["y"],
-                marker=centroid_marker,
-                c=centroid_color,
-                s=centroid_size,
-                alpha=0.8,
-                linewidths=0,
-                zorder=5,
+    # Reserve a box a little larger than the marker itself, scaled with the
+    # requested size so labels keep clear of it.
+    marker_half = span * 0.010 * max(1.0, (centroid_size / 26.0) ** 0.5)
+    for cluster, centroid in centroids.items():
+        if not selected.get(cluster):
+            continue
+        ax_right.scatter(
+            centroid["x"],
+            centroid["y"],
+            marker=centroid_marker,
+            c=centroid_color,
+            s=centroid_size,
+            alpha=0.8 if show_centroids else 0.0,
+            linewidths=0,
+            zorder=5,
+        )
+        reserved.append(
+            (
+                centroid["x"] - marker_half,
+                centroid["y"] - marker_half,
+                centroid["x"] + marker_half,
+                centroid["y"] + marker_half,
             )
-            reserved.append(
-                (
-                    centroid["x"] - marker_half,
-                    centroid["y"] - marker_half,
-                    centroid["x"] + marker_half,
-                    centroid["y"] + marker_half,
-                )
-            )
+        )
 
     label_boxes, skipped = _place_labels(
         ax_right,

@@ -273,9 +273,10 @@ How the layout works:
   then widened to cover anything that had to go outside, so nothing is clipped.
 - Labels that cannot be placed anywhere are dropped rather than drawn on top of
   each other. `verbose=True` reports how many.
-- The centroid markers count as obstacles, so `show_centroids=False` both hides
-  them and lets the labels sit closer to the centre. The reserved space scales
-  with `centroid_size`.
+- The centroid markers count as obstacles, and they do so whether or not they
+  are visible: `show_centroids=False` draws them transparently rather than
+  skipping them, so hiding the markers never moves a label. The reserved space
+  scales with `centroid_size`.
 
 If the figure is crowded, lower `top_n`, raise `figsize`, or shorten labels with
 `max_label_chars`.

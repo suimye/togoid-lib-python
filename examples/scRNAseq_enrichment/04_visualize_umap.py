@@ -41,7 +41,10 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--no-centroids",
         action="store_true",
-        help="Do not mark the cluster centroids on the enrichment panel",
+        help=(
+            "Hide the cluster centroid markers. They are still drawn "
+            "transparently and still reserve their space, so the labels do not move"
+        ),
     )
     parser.add_argument(
         "--centroid-marker",
