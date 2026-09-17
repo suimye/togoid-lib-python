@@ -229,6 +229,66 @@ results.to_csv("out.csv")
 results.summary(alpha=0.05)        # readable per-cluster report
 ```
 
+## Tables
+
+### Reading the result
+
+A result prints as a formatted table in a console, and renders as an HTML table in
+Jupyter and similar notebooks:
+
+```python
+print(results)     # or just `results` in a notebook cell
+results.to_text(max_rows=None, max_label=60, max_genes=10)
+```
+
+The display folds `overlap_count` and `term_size` into one `k/M` column and drops
+`query_size` and `background_size`, which are constant within a query. Nothing is
+lost — `to_rows()`, `to_dataframe()` and the file exports all carry every column.
+
+### Writing the result
+
+```python
+results.to_tsv("enrichment.tsv")     # one row per term, tab-separated
+results.to_csv("enrichment.csv")     # ... comma-separated
+results.to_csv("enrichment.txt", sep="|")
+```
+
+Tabs are the default for a reason: term labels routinely contain commas, which a
+CSV has to quote and some spreadsheet imports then mis-parse.
+
+### One row per cluster
+
+```python
+results.to_cluster_table(top_n=3, alpha=0.05)
+results.write_cluster_table("by_cluster.tsv", top_n=3)
+```
+
+| Column | Meaning |
+|---|---|
+| `cluster` | Cluster label |
+| `n_tested` | Terms tested for that cluster |
+| `n_significant` | Terms below `alpha` |
+| `top1_term_id`, `top1_term_label`, `top1_fdr` | The best term |
+| `top2_…`, `top3_…` | Runners-up, up to `top_n` |
+
+This is the shape you want when labelling clusters or reading a figure as a table.
+
+### Matching a figure exactly
+
+`plot_umap_enrichment` picks the terms it draws with `select_terms`. Call it
+yourself with the same filters and the table cannot disagree with the picture:
+
+```python
+from togoid.enrichment import select_terms, selected_terms_table
+
+selected = select_terms(results, top_n=3, fdr_cutoff=0.05, max_label_chars=None)
+rows = selected_terms_table(selected)   # flat, ordered by cluster then FDR
+```
+
+`examples/scRNAseq_enrichment/04_visualize_umap.py` does exactly this, writing
+`<figure-name>.tsv` and `<figure-name>_by_cluster.tsv` next to every figure.
+Pass `--no-tables` to skip them.
+
 ## Visualising on a UMAP
 
 ```python

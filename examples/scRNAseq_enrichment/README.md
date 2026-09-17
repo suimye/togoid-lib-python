@@ -135,9 +135,15 @@ without overlapping are dropped rather than drawn illegibly.
 |---|---|
 | `04_umap_centroids.pdf/.png` | Reference figure showing where labels are anchored |
 | `04_umap_enrichment_<target>_top<N>.pdf/.png` | The two-panel enrichment figure |
+| `04_umap_enrichment_<target>_top<N>.tsv` | The terms drawn on that figure, one row per term |
+| `04_umap_enrichment_<target>_top<N>_by_cluster.tsv` | The same terms, one row per cluster |
+
+The TSV tables are written with the same filters the figure used, so the two can
+never disagree. Tabs rather than commas, because term labels contain commas.
 
 Useful options: `--top-n 5`, `--fdr-cutoff 0.01`, `--clusters 0,3,7`,
-`--max-label-chars 30`, `--formats pdf` (skip the PNG).
+`--max-label-chars 30`, `--formats pdf` (skip the PNG), `--no-tables` (skip the
+TSVs), `--no-centroids` (hide the centroid markers).
 
 ## Reading the results
 

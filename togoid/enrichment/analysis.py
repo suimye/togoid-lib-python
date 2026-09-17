@@ -7,7 +7,7 @@ view is available for anyone who has it installed.
 import csv
 import os
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
 
 from .genesets import GeneSetLibrary
 from .stats import benjamini_hochberg, fold_enrichment, hypergeometric_sf
@@ -71,6 +71,9 @@ class _BaseResult:
     def __iter__(self):
         return iter(self.rows)
 
+    def __str__(self) -> str:
+        return self.to_text()
+
     def to_rows(self) -> List[Dict[str, Any]]:
         """Return the result as a list of plain dictionaries."""
         return [row.to_dict() for row in self.rows]
@@ -96,12 +99,21 @@ class _BaseResult:
             frame = frame.drop(columns=["cluster"])
         return frame
 
-    def to_csv(self, path: str) -> str:
+    def columns(self) -> List[str]:
+        """Column names present in this result, in the documented order."""
+        rows = self.to_rows()
+        columns = list(RESULT_COLUMNS)
+        if not any(row.get("cluster") is not None for row in rows):
+            columns.remove("cluster")
+        return columns
+
+    def to_csv(self, path: str, sep: str = ",") -> str:
         """
-        Write the result to a CSV file.
+        Write the result to a delimited text file.
 
         Args:
             path: Destination file path.
+            sep: Field separator; ``","`` by default.
 
         Returns:
             The path that was written.
@@ -110,17 +122,178 @@ class _BaseResult:
         if directory:
             os.makedirs(directory, exist_ok=True)
 
-        rows = self.to_rows()
-        columns = list(RESULT_COLUMNS)
-        if not any(row.get("cluster") is not None for row in rows):
-            columns.remove("cluster")
-
+        columns = self.columns()
         with open(path, "w", newline="", encoding="utf-8") as handle:
-            writer = csv.DictWriter(handle, fieldnames=columns, extrasaction="ignore")
+            writer = csv.DictWriter(
+                handle, fieldnames=columns, extrasaction="ignore", delimiter=sep
+            )
             writer.writeheader()
-            for row in rows:
+            for row in self.to_rows():
                 writer.writerow(row)
         return path
+
+    def to_tsv(self, path: str) -> str:
+        """
+        Write the result to a tab-separated file.
+
+        Tabs are the safer choice here: term labels routinely contain commas,
+        which a CSV has to quote and some tools then mis-parse.
+
+        Args:
+            path: Destination file path.
+
+        Returns:
+            The path that was written.
+        """
+        return self.to_csv(path, sep="\t")
+
+    # ------------------------------------------------------------------ #
+    # Human-readable views
+    # ------------------------------------------------------------------ #
+
+    def _display_rows(
+        self,
+        max_rows: Optional[int] = None,
+        max_label: int = 52,
+        max_genes: int = 6,
+    ) -> Tuple[List[str], List[List[str]], int]:
+        """
+        Build the shortened cell values used by the text and HTML tables.
+
+        Args:
+            max_rows: Keep at most this many rows.
+            max_label: Truncate term labels beyond this many characters.
+            max_genes: Show at most this many gene symbols per row.
+
+        Returns:
+            Tuple of ``(header, rows, n_hidden)``.
+        """
+        # query_size and background_size are constant within a query, and the
+        # overlap only means anything next to the term size, so they are folded
+        # into one "k/M" column. The full numbers stay in to_rows()/to_tsv().
+        available = self.columns()
+        columns = [
+            c
+            for c in available
+            if c not in ("overlap_count", "term_size", "query_size", "background_size")
+        ]
+        columns.insert(columns.index("term_label") + 1, "overlap")
+
+        rows = self.to_rows()
+        hidden = 0
+        if max_rows is not None and len(rows) > max_rows:
+            hidden = len(rows) - max_rows
+            rows = rows[:max_rows]
+
+        rendered: List[List[str]] = []
+        for row in rows:
+            cells: List[str] = []
+            for column in columns:
+                value = row.get(column)
+                if column == "overlap":
+                    cells.append(f"{row['overlap_count']}/{row['term_size']}")
+                elif value is None:
+                    cells.append("")
+                elif column in ("pvalue", "fdr"):
+                    cells.append(f"{float(value):.2e}")
+                elif column == "fold_enrichment":
+                    cells.append(f"{float(value):.2f}")
+                elif column == "term_label":
+                    text = str(value)
+                    cells.append(
+                        text if len(text) <= max_label else text[: max_label - 1] + "…"
+                    )
+                elif column == "genes":
+                    parts = [g for g in str(value).split(",") if g]
+                    if len(parts) > max_genes:
+                        cells.append(
+                            ", ".join(parts[:max_genes]) + f" (+{len(parts) - max_genes})"
+                        )
+                    else:
+                        cells.append(", ".join(parts))
+                else:
+                    cells.append(str(value))
+            rendered.append(cells)
+
+        return columns, rendered, hidden
+
+    def to_text(
+        self,
+        max_rows: Optional[int] = 20,
+        max_label: int = 52,
+        max_genes: int = 6,
+    ) -> str:
+        """
+        Render the result as a column-aligned plain-text table.
+
+        Args:
+            max_rows: Rows to show; ``None`` shows all.
+            max_label: Truncate term labels beyond this many characters.
+            max_genes: Show at most this many gene symbols per row.
+
+        Returns:
+            The table as a single string, ready to print.
+        """
+        header, rows, hidden = self._display_rows(max_rows, max_label, max_genes)
+        if not rows:
+            return "(no enriched terms)"
+
+        widths = [
+            max(len(header[i]), max(len(row[i]) for row in rows))
+            for i in range(len(header))
+        ]
+        # Numbers read better right-aligned, text left-aligned.
+        numeric = {"overlap", "pvalue", "fdr", "fold_enrichment"}
+
+        def render(cells: Sequence[str]) -> str:
+            return "  ".join(
+                cell.rjust(widths[i]) if header[i] in numeric else cell.ljust(widths[i])
+                for i, cell in enumerate(cells)
+            ).rstrip()
+
+        lines = [render(header), "  ".join("-" * w for w in widths)]
+        lines.extend(render(row) for row in rows)
+        if hidden:
+            lines.append(f"... and {hidden} more row(s)")
+        return "\n".join(lines)
+
+    def _repr_html_(self) -> str:
+        """
+        Render the result as an HTML table for Jupyter and similar notebooks.
+
+        Returns:
+            An HTML fragment.
+        """
+        from html import escape
+
+        header, rows, hidden = self._display_rows(max_rows=50)
+        if not rows:
+            return "<em>(no enriched terms)</em>"
+
+        style = (
+            "border-collapse:collapse;font-size:90%;"
+            "font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif"
+        )
+        cell = "padding:3px 8px;border-bottom:1px solid #e5e5e5;text-align:left"
+        head = (
+            "padding:3px 8px;border-bottom:2px solid #999;"
+            "text-align:left;white-space:nowrap"
+        )
+
+        parts = [f'<table style="{style}"><thead><tr>']
+        parts += [f'<th style="{head}">{escape(c)}</th>' for c in header]
+        parts.append("</tr></thead><tbody>")
+        for row in rows:
+            parts.append("<tr>")
+            parts += [f'<td style="{cell}">{escape(c)}</td>' for c in row]
+            parts.append("</tr>")
+        parts.append("</tbody></table>")
+
+        caption = f"{len(self.rows)} term(s)"
+        if hidden:
+            caption += f", showing the first {len(rows)}"
+        parts.append(f'<div style="font-size:85%;color:#666">{escape(caption)}</div>')
+        return "".join(parts)
 
 
 class EnrichmentResult(_BaseResult):
@@ -189,6 +362,77 @@ class ClusterEnrichmentResult(_BaseResult):
         return ClusterEnrichmentResult(
             {cluster: result.top(n) for cluster, result in self.per_cluster.items()}
         )
+
+    def to_cluster_table(
+        self, top_n: int = 3, alpha: float = 0.05
+    ) -> List[Dict[str, Any]]:
+        """
+        Build a wide table with one row per cluster.
+
+        Where :meth:`to_rows` gives one row per term, this gives one row per
+        cluster with its best terms side by side — the shape you want when
+        labelling clusters or putting the result next to a UMAP figure.
+
+        Args:
+            top_n: Number of terms to include per cluster.
+            alpha: FDR threshold used to pick and count the terms.
+
+        Returns:
+            A list of dictionaries, one per cluster.
+        """
+        rows: List[Dict[str, Any]] = []
+        for cluster, result in self.per_cluster.items():
+            significant = result.significant(alpha)
+            row: Dict[str, Any] = {
+                "cluster": cluster,
+                "n_tested": len(result),
+                "n_significant": len(significant),
+            }
+            for index in range(1, top_n + 1):
+                term = significant.rows[index - 1] if index <= len(significant) else None
+                row[f"top{index}_term_id"] = term.term_id if term else ""
+                row[f"top{index}_term_label"] = term.term_label if term else ""
+                row[f"top{index}_fdr"] = term.fdr if term else ""
+            rows.append(row)
+        return rows
+
+    def write_cluster_table(
+        self, path: str, top_n: int = 3, alpha: float = 0.05, sep: str = "\t"
+    ) -> str:
+        """
+        Write the wide per-cluster table from :meth:`to_cluster_table`.
+
+        Args:
+            path: Destination file path.
+            top_n: Number of terms to include per cluster.
+            alpha: FDR threshold used to pick and count the terms.
+            sep: Field separator; tab by default.
+
+        Returns:
+            The path that was written.
+        """
+        rows = self.to_cluster_table(top_n=top_n, alpha=alpha)
+        directory = os.path.dirname(os.path.abspath(path))
+        if directory:
+            os.makedirs(directory, exist_ok=True)
+
+        columns = ["cluster", "n_tested", "n_significant"]
+        for index in range(1, top_n + 1):
+            columns += [f"top{index}_term_id", f"top{index}_term_label", f"top{index}_fdr"]
+
+        with open(path, "w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(
+                handle, fieldnames=columns, extrasaction="ignore", delimiter=sep
+            )
+            writer.writeheader()
+            for row in rows:
+                writer.writerow(
+                    {
+                        k: (f"{v:.3e}" if isinstance(v, float) else v)
+                        for k, v in row.items()
+                    }
+                )
+        return path
 
     def summary(self, alpha: float = 0.05) -> str:
         """

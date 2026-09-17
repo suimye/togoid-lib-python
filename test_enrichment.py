@@ -312,6 +312,111 @@ def test_enrich_clusters() -> None:
         )
 
 
+def test_tables() -> None:
+    """TSV export and the human-readable table views."""
+    section("Table output")
+
+    library = build_library()
+    clusters = {
+        "0": ["CD3D", "CD3E", "CD3G", "LCK", "ZAP70"],
+        "1": ["MS4A1", "CD79A", "CD79B", "CD19", "BLNK"],
+    }
+    results = enrich_clusters(clusters, library, min_set_size=3)
+
+    with tempfile.TemporaryDirectory() as directory:
+        path = os.path.join(directory, "out.tsv")
+        results.to_tsv(path)
+        with open(path, encoding="utf-8") as handle:
+            lines = handle.read().splitlines()
+
+        check(lines[0].split("\t")[0] == "cluster", "to_tsv writes a tab-separated header")
+        check(len(lines) == len(results) + 1, "to_tsv writes one line per term")
+        check(
+            all(len(line.split("\t")) == len(lines[0].split("\t")) for line in lines),
+            "every to_tsv row has the same number of fields",
+        )
+        # A label containing a comma must not need quoting in a TSV.
+        check('"' not in "\n".join(lines), "to_tsv needs no quoting")
+
+        wide = os.path.join(directory, "wide.tsv")
+        results.write_cluster_table(wide, top_n=2)
+        with open(wide, encoding="utf-8") as handle:
+            wide_lines = handle.read().splitlines()
+        check(
+            wide_lines[0].startswith("cluster\tn_tested\tn_significant"),
+            "write_cluster_table writes the cluster columns first",
+        )
+        check(
+            len(wide_lines) == len(results.clusters) + 1,
+            "write_cluster_table writes one row per cluster",
+        )
+        check("top2_fdr" in wide_lines[0], "write_cluster_table honours top_n")
+
+    table = results.to_cluster_table(top_n=2)
+    check(len(table) == len(results.clusters), "to_cluster_table has one row per cluster")
+    check(table[0]["cluster"] == "0", "to_cluster_table keeps the cluster order")
+    check(
+        table[0]["top1_term_id"] == results["0"].significant().rows[0].term_id,
+        "to_cluster_table reports the most significant term first",
+    )
+
+    text = results.to_text()
+    check("cluster" in text and "term_label" in text, "to_text has a header")
+    check(len(text.splitlines()) == len(results) + 2, "to_text writes one line per term")
+    check("overlap" in text, "to_text folds the overlap and term size into one column")
+    check(
+        "background_size" not in text,
+        "to_text omits the constant background_size column",
+    )
+    check(str(results) == text, "printing a result shows the table")
+
+    html = results._repr_html_()
+    check(html.startswith("<table"), "_repr_html_ returns a table")
+    # One <tr> per term, plus the header row.
+    check(
+        html.count("<tr>") == len(results) + 1,
+        "_repr_html_ has one row per term plus a header",
+    )
+    check("</table>" in html, "_repr_html_ is closed properly")
+
+    # HTML special characters in a label must be escaped, not injected.
+    risky = GeneSetLibrary(
+        sets={"X": {"A", "B", "C"}}, labels={"X": "<b>bold</b> & risky"}
+    )
+    risky_html = enrich(["A", "B", "C"], risky, min_set_size=3)._repr_html_()
+    check("&lt;b&gt;" in risky_html, "_repr_html_ escapes HTML in labels")
+    check("<b>bold</b>" not in risky_html, "_repr_html_ does not inject raw HTML")
+
+    empty = enrich([], library)
+    check(empty.to_text() == "(no enriched terms)", "to_text handles an empty result")
+    check("no enriched terms" in empty._repr_html_(), "_repr_html_ handles an empty result")
+
+
+def test_selected_terms_table() -> None:
+    """The exported table must match what the figure draws."""
+    section("selected_terms_table()")
+
+    from togoid.enrichment import selected_terms_table
+
+    rows = [
+        {"cluster": "1", "term_id": "B", "term_label": "beta", "pvalue": 1e-3, "fdr": 2e-3},
+        {"cluster": "0", "term_id": "A", "term_label": "alpha", "pvalue": 1e-6, "fdr": 1e-5},
+        {"cluster": "0", "term_id": "C", "term_label": "gamma", "pvalue": 0.4, "fdr": 0.5},
+    ]
+
+    selected = select_terms(rows, top_n=None, fdr_cutoff=0.05)
+    table = selected_terms_table(selected)
+
+    check(len(table) == 2, "keeps only the terms that pass the filters")
+    check([r["cluster"] for r in table] == ["0", "1"], "orders rows by cluster")
+    check(
+        "label" not in table[0] and "weight" not in table[0],
+        "drops the layout-only columns",
+    )
+    check(table[0]["term_id"] == "A", "keeps the original fields")
+    check(selected_terms_table({}) == [], "handles an empty selection")
+
+
 def test_dataframe_views() -> None:
     """The pandas views mirror the plain rows."""
     section("DataFrame views")
@@ -620,6 +725,8 @@ def main() -> int:
     test_gene_set_library()
     test_enrich()
     test_enrich_clusters()
+    test_tables()
+    test_selected_terms_table()
     test_dataframe_views()
     test_presets()
     test_centroids_and_layout()

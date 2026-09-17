@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 __all__ = [
     "cluster_centroids",
     "select_terms",
+    "selected_terms_table",
     "plot_umap_enrichment",
     "plot_umap_centroids",
     "spiral_positions",
@@ -237,6 +238,31 @@ def select_terms(
 # ---------------------------------------------------------------------- #
 # Plotting
 # ---------------------------------------------------------------------- #
+
+
+def selected_terms_table(
+    selected: Mapping[str, Sequence[Mapping[str, Any]]]
+) -> List[Dict[str, Any]]:
+    """
+    Flatten :func:`select_terms` output into rows, ordered for reading.
+
+    Use this to export exactly the terms a figure shows: pass the same filters
+    to :func:`select_terms`, and the table and the figure cannot disagree.
+
+    Args:
+        selected: Mapping of cluster label to its selected terms.
+
+    Returns:
+        A flat list of dictionaries, ordered by cluster and then significance.
+        The layout-only fields (``label``, ``weight``) are dropped.
+    """
+    rows: List[Dict[str, Any]] = []
+    for cluster in sorted(selected, key=_cluster_sort_key):
+        for entry in selected[cluster]:
+            row = {k: v for k, v in entry.items() if k not in ("label", "weight")}
+            row["cluster"] = cluster
+            rows.append(row)
+    return rows
 
 
 def _require_matplotlib():

@@ -898,6 +898,53 @@ targets.
 Full-resolution figures and the analysis notes are collected in
 [issue #1](https://github.com/suimye/togoid-lib-python/issues/1).
 
+### Tables and Notebook Display
+
+Results print as a formatted table in a console, and render as an HTML table in
+Jupyter:
+
+```python
+print(results)          # or just `results` in a notebook
+```
+
+```
+cluster  term_id        term_label                            overlap    pvalue       fdr  fold_enrichment  genes
+-------  -------------  ------------------------------------  -------  --------  --------  ---------------  ---------------------------------
+0        R-HSA-6798695  Neutrophil degranulation                32/60  8.15e-20  6.85e-18             5.39  ANPEP, ASAH1, CD14, CD36 (+28)
+0        R-HSA-166058   MyD88:MAL(TIRAP) cascade initiated o…      6/7  5.02e-06  2.11e-04             8.65  CD14, CD36, IRAK3, S100A8, TLR2
+1        R-HSA-156902   Peptide chain elongation                32/70  3.75e-17  2.47e-15             4.62  EEF1A1, RPL10, RPL11 (+29)
+```
+
+The display folds `overlap_count` and `term_size` into one `k/M` column and drops
+`query_size` and `background_size`, which are constant. Every column is still
+there in the data — only the view is shortened.
+
+Writing tables out:
+
+```python
+results.to_tsv("enrichment.tsv")            # one row per term
+results.to_csv("enrichment.csv")            # same, comma-separated
+results.write_cluster_table("by_cluster.tsv", top_n=3)   # one row per cluster
+results.to_cluster_table(top_n=3)           # ... as a list of dicts
+results.to_dataframe()                      # ... as a pandas DataFrame
+```
+
+Tabs are the default for a reason: term labels routinely contain commas, which a
+CSV has to quote and some spreadsheet imports then mis-parse.
+
+To export exactly what a figure shows, pass the same filters to `select_terms()`:
+
+```python
+from togoid.enrichment import select_terms, selected_terms_table
+
+selected = select_terms(results, top_n=3, fdr_cutoff=0.05)
+rows = selected_terms_table(selected)   # flat, ordered by cluster then FDR
+```
+
+Step 4 of the example pipeline does this automatically, writing
+`<figure-name>.tsv` and `<figure-name>_by_cluster.tsv` beside every figure, so
+the table and the picture can never disagree.
+
 ### Single-Cell Adapters
 
 The core knows nothing about scanpy or Seurat; these adapters do the translation

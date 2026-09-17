@@ -33,6 +33,7 @@ from .plot import (
     plot_umap_centroids,
     plot_umap_enrichment,
     select_terms,
+    selected_terms_table,
 )
 from .presets import (
     GO_ASPECTS,
@@ -72,4 +73,5 @@ __all__ = [
     "plot_umap_centroids",
     "cluster_centroids",
     "select_terms",
+    "selected_terms_table",
 ]
