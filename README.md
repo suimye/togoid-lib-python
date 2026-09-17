@@ -13,6 +13,7 @@ Python library and CLI tool for biological database ID conversion and annotation
 - **Multiple Formats**: Support for JSON, CSV, TSV, dict, table, and pandas DataFrame
 - **Dual Interface**: Use as Python library or command-line tool
 - **Comprehensive**: Search databases, find routes, get configurations
+- **Enrichment Analysis**: Turn any conversion route into gene sets, test them for over-representation, and draw the result on a single-cell UMAP
 
 ## Installation
 
@@ -722,6 +723,226 @@ converter.convert(ids=["1"], route=["ncbigene", "chembl_compound"])
 # - ncbigene → ensembl_gene → pdb → chembl_compound
 ```
 
+## Use Case: Enrichment Analysis and UMAP Visualization
+
+`togoid.enrichment` turns ID conversion into gene-set analysis. A TogoID route
+that ends in an annotation dataset *is* a gene-set library: every term reached by
+the route becomes a set containing the input genes that map to it. From there it
+is a standard over-representation analysis, and the results can be drawn directly
+onto a single-cell embedding.
+
+The key property is that **only the route changes** between annotation databases:
+
+```python
+from togoid.enrichment import build_gene_sets
+
+build_gene_sets(genes, route=["ncbigene", "uniprot", "reactome_pathway"])  # pathways
+build_gene_sets(genes, route=["ncbigene", "uniprot", "go"])                # GO terms
+build_gene_sets(genes, route=["ncbigene", "medgen", "mondo"])              # diseases
+```
+
+Anything TogoID can reach works the same way. The enrichment core needs **no
+dependencies beyond those `togoid` already requires** — the hypergeometric test
+and the BH-FDR correction are implemented with `math.lgamma`. pandas, matplotlib
+and scanpy are optional extras, imported lazily.
+
+See [docs/enrichment.md](docs/enrichment.md) for the full manual and
+[examples/scRNAseq_enrichment/](examples/scRNAseq_enrichment/) for a runnable
+pipeline.
+
+### Installation
+
+```bash
+pip install togoid                  # gene sets, statistics, CSV/JSON output
+pip install "togoid[enrichment]"    # + pandas, for the to_dataframe() views
+pip install "togoid[plot]"          # + matplotlib, for the UMAP figures
+pip install "togoid[singlecell]"    # + scanpy and leidenalg, for the full example
+```
+
+### Quick Start
+
+```python
+from togoid.enrichment import build_gene_sets, enrich_clusters
+
+clusters = {
+    "T cells": ["CD3D", "CD3E", "CD3G", "IL7R", "LCK", "ZAP70", "CD2", "CD28", "LAT"],
+    "B cells": ["MS4A1", "CD79A", "CD79B", "CD19", "BLNK", "BANK1", "PAX5"],
+    "Myeloid": ["LYZ", "CD14", "FCGR3A", "CSF1R", "ITGAM", "TLR2", "TLR4", "S100A8"],
+}
+all_genes = sorted({gene for genes in clusters.values() for gene in genes})
+
+library = build_gene_sets(all_genes, route=["ncbigene", "uniprot", "reactome_pathway"])
+results = enrich_clusters(clusters, library, min_set_size=3)
+
+print(results.summary())
+results.to_csv("enrichment.csv")
+```
+
+```
+Cluster B cells:
+  terms tested: 6
+  significant (FDR < 0.05): 2
+    - Antigen activates B Cell Receptor (BCR) leading to generation of second messengers
+      FDR=1.40e-02  genes=4/4  fold=3.71
+
+Cluster T cells:
+  terms tested: 11
+  significant (FDR < 0.05): 5
+    - Generation of second messenger molecules
+      FDR=4.01e-03  genes=6/6  fold=2.89
+    - Translocation of ZAP-70 to Immunological synapse
+      FDR=1.05e-02  genes=5/5  fold=2.89
+```
+
+### Three Annotation Databases
+
+```python
+from togoid.enrichment import reactome_gene_sets, go_gene_sets, mondo_gene_sets
+
+# Reactome pathways: ncbigene -> uniprot -> reactome_pathway
+pathways = reactome_gene_sets(all_genes, taxonomy="9606")
+
+# GO terms: ncbigene -> uniprot -> go, filtered by aspect
+processes = go_gene_sets(all_genes, aspect="biological_process")
+functions = go_gene_sets(all_genes, aspect="molecular_function")
+
+# MONDO diseases: ncbigene -> medgen -> mondo
+diseases = mondo_gene_sets(all_genes)
+```
+
+These presets are thin wrappers over `build_gene_sets`. If you pass a route that
+does not exist, the error names the working alternatives:
+
+```
+RuntimeError: Conversion along route ncbigene -> hp_phenotype failed for all 1 batch(es).
+First error: No direct connection between 'ncbigene' and 'hp_phenotype'.
+Try one of these routes instead:
+  - ncbigene -> medgen -> hp_phenotype
+  - ncbigene -> nando -> hp_phenotype
+```
+
+### Caching Gene Sets
+
+Building a library for a few thousand genes is many API calls. Save it once and
+the analysis reproduces exactly, offline:
+
+```python
+from togoid.enrichment import GeneSetLibrary
+
+library.save_json("reactome.json")
+library = GeneSetLibrary.load_json("reactome.json")   # no network access
+```
+
+### UMAP Visualization
+
+```python
+from togoid.enrichment import plot_umap_enrichment
+
+fig = plot_umap_enrichment(
+    embedding,          # DataFrame or dict with umap_1, umap_2, cluster
+    results,
+    top_n=3,
+    fdr_cutoff=0.05,
+)
+fig.savefig("umap_enrichment.pdf")
+```
+
+The left panel is the usual cluster UMAP; the right repeats it with each
+cluster's enriched terms written around its centroid, sized by `-log10(p)`.
+Labels that cannot be placed without overlapping are dropped rather than drawn on
+top of each other, and the axes are widened so nothing is clipped.
+
+`embedding` is any mapping with `umap_1`, `umap_2` and `cluster` keys — plain
+lists work, so this step does not require pandas.
+
+#### Reactome pathways
+
+10x Genomics public PBMC data, 3,733 cells after QC, 13 Leiden clusters.
+
+![UMAP with enriched Reactome pathways](https://raw.githubusercontent.com/suimye/togoid-lib-python/docs-figures/umap_enrichment_reactome.png)
+
+Platelet degranulation marks the platelet cluster, MHC class II antigen
+presentation the monocyte/DC clusters, and B cell receptor signalling the B cell
+cluster.
+
+#### GO biological process
+
+![UMAP with enriched GO biological processes](https://raw.githubusercontent.com/suimye/togoid-lib-python/docs-figures/umap_enrichment_go.png)
+
+An independent confirmation of the Reactome result via a different route:
+platelet aggregation on the same platelet cluster, T cell activation on the T
+cell clusters.
+
+#### MONDO diseases
+
+![UMAP with enriched MONDO diseases](https://raw.githubusercontent.com/suimye/togoid-lib-python/docs-figures/umap_enrichment_mondo.png)
+
+Disease annotation is far sparser than pathway annotation, so only a couple of
+terms pass the size and significance filters. Shown as-is, because the contrast
+with the two figures above illustrates how coverage differs between TogoID
+targets.
+
+Full-resolution figures and the analysis notes are collected in
+[issue #1](https://github.com/suimye/togoid-lib-python/issues/1).
+
+### Single-Cell Adapters
+
+The core knows nothing about scanpy or Seurat; these adapters do the translation
+and import their dependencies only when called.
+
+```python
+from togoid.enrichment.adapters import (
+    umap_dataframe_from_anndata, marker_genes_from_anndata,   # scanpy / AnnData
+    umap_dataframe_from_csv, marker_genes_from_csv,           # Seurat, via CSV
+)
+
+import scanpy as sc
+sc.tl.rank_genes_groups(adata, "leiden", method="wilcoxon")
+
+embedding = umap_dataframe_from_anndata(adata, cluster_key="leiden")
+markers   = marker_genes_from_anndata(adata, top_n=100, pval_cutoff=0.05)
+```
+
+### Enrich Command
+
+```bash
+# A single gene list
+togoid enrich --genes "CD3D,CD3E,LCK,ZAP70,LAT" --preset reactome --format summary
+
+# Per-cluster, from a CSV with cluster and gene columns
+togoid enrich --clusters-file markers.csv --preset reactome \
+              --fdr 0.05 --output enrichment.csv
+
+# Any route, not just the presets
+togoid enrich --genes-file genes.txt \
+              --route ncbigene,uniprot,reactome_pathway --output out.csv
+
+# GO, restricted to one aspect
+togoid enrich --genes-file genes.txt --preset go \
+              --go-aspect molecular_function --output go_mf.csv
+
+# Build the library once, reuse it offline
+togoid enrich --genes-file all_genes.txt --preset reactome --save-genesets sets.json
+togoid enrich --clusters-file markers.csv --load-genesets sets.json --output out.csv
+
+# Mouse instead of human
+togoid enrich --genes-file genes.txt --preset reactome --taxonomy 10090
+```
+
+### Choosing a Background
+
+This is the decision that most affects the results.
+
+- **Default** (`background=None`): every gene in the library, i.e. every gene in
+  your experiment that TogoID could annotate. This asks *which terms distinguish
+  this cluster from the rest of the experiment* — usually the right question for
+  cell types.
+- **Explicit**: pass a larger universe for the conventional *over-represented
+  relative to the genome* question. Expect many more significant hits.
+
+`enrich_clusters` shares one background across clusters, which is what makes the
+FDR values comparable between them.
+
 ## Configuration
 
 ### Environment Variables
@@ -743,7 +964,13 @@ togoid --api-url http://localhost:5000 convert --ids 1,9 --route ncbigene,ensemb
 
 - Python 3.7+
 - requests >= 2.20.0
-- pandas >= 1.0.0 (optional, for DataFrame format)
+- pandas >= 1.0.0 (optional, for DataFrame format and `togoid[enrichment]`)
+- matplotlib >= 3.5 (optional, for the UMAP figures; `togoid[plot]`)
+- scanpy >= 1.9 and leidenalg >= 0.9 (optional, for the scRNA-seq example;
+  `togoid[singlecell]`)
+
+The enrichment analysis itself runs on a bare install: the hypergeometric test
+and the BH-FDR correction use only the standard library.
 
 ## Testing
 
@@ -755,7 +982,15 @@ python3 test_readme_examples.py
 
 # Test CLI examples
 bash test_cli_examples.sh
+
+# Test the enrichment analysis (no network access required)
+python3 test_enrichment.py
+
+# Test the enrichment analysis against the live TogoID API
+python3 test_enrichment_api.py
 ```
+
+See [TESTING.md](TESTING.md) for what each script covers.
 
 ## License
 

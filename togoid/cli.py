@@ -13,6 +13,7 @@ from typing import Optional, List
 from .converter import TogoIDConverter
 from .annotations import AnnotationsConverter, parse_filters, load_ids, ensure_fields, output_table, output_json
 from .label_converter import LabelConverter, parse_labels, output_results
+from .enrichment.cli import add_enrich_parser, handle_enrich
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -37,6 +38,9 @@ Examples:
 
   # Get configuration
   togoid config dataset ncbigene
+
+  # Enrichment analysis of a gene list
+  togoid enrich --genes "CD3D,CD3E,LCK,ZAP70" --preset reactome
         """
     )
 
@@ -169,6 +173,10 @@ Examples:
     ortholog_parser.add_argument('--format', choices=['json', 'csv', 'tsv', 'dict', 'table', 'dataframe'],
                                  default='table', help='Output format (default: table)')
     ortholog_parser.add_argument('--output', help='Output file path')
+
+    # ========== ENRICH subcommand ==========
+    # Defined in togoid.enrichment.cli so the feature stays self-contained.
+    add_enrich_parser(subparsers)
 
     return parser
 
@@ -432,6 +440,9 @@ def main():
         elif args.command == 'get-ortholog':
             converter = TogoIDConverter(api_base_url=api_url)
             return handle_get_ortholog(args, converter)
+
+        elif args.command == 'enrich':
+            return handle_enrich(args, api_url)
 
         elif args.command == 'config':
             converter = TogoIDConverter(api_base_url=api_url)

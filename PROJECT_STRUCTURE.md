@@ -8,10 +8,28 @@ togoid-lib-python/
 │   ├── converter.py           # TogoIDConverter - ID conversion
 │   ├── annotations.py         # AnnotationsConverter - Annotations retrieval
 │   ├── label_converter.py     # LabelConverter - Label to ID conversion
-│   └── cli.py                 # Unified CLI with all subcommands
+│   ├── cli.py                 # Unified CLI with all subcommands
+│   ├── _ids.py                # Shared CURIE/local-ID helper
+│   └── enrichment/            # Enrichment analysis and UMAP visualization
+│       ├── __init__.py        # Public API
+│       ├── genesets.py        # TogoID route -> GeneSetLibrary
+│       ├── stats.py           # Hypergeometric test, BH-FDR (no dependencies)
+│       ├── analysis.py        # enrich() / enrich_clusters() and result types
+│       ├── presets.py         # Reactome / GO / MONDO route presets
+│       ├── adapters.py        # AnnData and CSV adapters
+│       ├── plot.py            # UMAP word-cloud figures
+│       └── cli.py             # `togoid enrich` subcommand
+│
+├── examples/
+│   └── scRNAseq_enrichment/   # End-to-end scRNA-seq pipeline
+│
+├── docs/
+│   └── enrichment.md          # Enrichment analysis manual
 │
 ├── test_readme_examples.py    # Python library tests
 ├── test_cli_examples.sh       # CLI tests
+├── test_enrichment.py         # Enrichment tests (offline)
+├── test_enrichment_api.py     # Enrichment tests (TogoID API)
 ├── TESTING.md                 # Testing documentation
 ├── README.md                  # Main documentation
 ├── pyproject.toml             # Package configuration
@@ -45,6 +63,17 @@ togoid-lib-python/
   - Automatic API detection (SPARQList vs PubDictionaries)
   - Support for gene symbols and disease labels
 
+### togoid/enrichment/
+- **Modules**: `genesets`, `stats`, `analysis`, `presets`, `adapters`, `plot`, `cli`
+- **Features**:
+  - Any TogoID route becomes a gene-set library (`build_gene_sets`)
+  - Over-representation analysis with hypergeometric test and BH-FDR
+  - Word-cloud visualization of results on a UMAP embedding
+  - Presets for Reactome, GO and MONDO; adapters for scanpy and Seurat
+- **Dependencies**: the core needs nothing beyond `requests`; pandas, matplotlib
+  and scanpy are optional extras, imported lazily
+- **Documentation**: [docs/enrichment.md](docs/enrichment.md)
+
 ### togoid/cli.py
 - **Unified CLI** with subcommands:
   - `convert` - ID conversion
@@ -55,6 +84,7 @@ togoid-lib-python/
   - `route` - Find conversion routes
   - `count` - Count mappings
   - `config` - Get configuration
+  - `enrich` - Enrichment analysis of gene lists (defined in `togoid/enrichment/cli.py`)
 
 ## Installation
 
@@ -70,6 +100,10 @@ uv pip install -e .
 
 # With pandas support
 uv pip install -e ".[pandas]"
+
+# With the enrichment extras
+uv pip install -e ".[plot]"          # + matplotlib, for the UMAP figures
+uv pip install -e ".[singlecell]"    # + scanpy, for the scRNA-seq example
 
 # With development tools
 uv pip install -e ".[dev]"
@@ -134,6 +168,10 @@ python3 test_readme_examples.py
 
 # Test CLI
 bash test_cli_examples.sh
+
+# Test enrichment (offline, then against the live API)
+python3 test_enrichment.py
+python3 test_enrichment_api.py
 ```
 
 See [TESTING.md](TESTING.md) for detailed testing documentation.

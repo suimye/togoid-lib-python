@@ -31,6 +31,18 @@ dependencies = [
 
 [project.optional-dependencies]
 pandas = ["pandas>=1.0.0"]
+# togoid.enrichment core (gene sets, statistics) needs nothing extra; pandas
+# only unlocks the to_dataframe() views.
+enrichment = ["pandas>=1.0.0"]
+# Adds the UMAP word-cloud figures.
+plot = ["pandas>=1.0.0", "matplotlib>=3.5"]
+# Everything needed to run examples/scRNAseq_enrichment end to end.
+singlecell = [
+    "pandas>=1.0.0",
+    "matplotlib>=3.5",
+    "scanpy>=1.9",
+    "leidenalg>=0.9",
+]
 dev = [
     "pytest>=6.0",
     "pytest-cov",
@@ -48,7 +60,7 @@ Repository = "https://github.com/togoid/togoid-lib-python"
 togoid = "togoid.cli:main"
 
 [tool.setuptools]
-packages = ["togoid"]
+packages = ["togoid", "togoid.enrichment"]
 
 [tool.setuptools.package-data]
 togoid = ["py.typed"]
