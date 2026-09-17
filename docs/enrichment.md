@@ -146,6 +146,10 @@ library.save_json("reactome.json")
 library = GeneSetLibrary.load_json("reactome.json")   # offline from here on
 ```
 
+The format is shared with the R library's `togoid_save_gene_sets()`, so a
+library built in either language can be read by the other and gives identical
+p-values.
+
 ### Presets
 
 ```python
