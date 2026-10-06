@@ -51,6 +51,12 @@ def section(title: str) -> None:
     print(f"\n=== {title} ===")
 
 
+def data_lines(path: str) -> list:
+    """Read a written table, skipping its ``#`` provenance header."""
+    with open(path, encoding="utf-8") as handle:
+        return [line for line in handle.read().splitlines() if not line.startswith("#")]
+
+
 # --------------------------------------------------------------------- #
 
 
@@ -298,16 +304,15 @@ def test_enrich_clusters() -> None:
     with tempfile.TemporaryDirectory() as directory:
         path = os.path.join(directory, "results.csv")
         results.to_csv(path)
-        with open(path, encoding="utf-8") as handle:
-            header = handle.readline().strip()
-        check(header.startswith("cluster,term_id"), "to_csv writes the cluster column")
+        check(
+            data_lines(path)[0].startswith("cluster,term_id"),
+            "to_csv writes the cluster column",
+        )
 
         single = os.path.join(directory, "single.csv")
         enrich(clusters["0"], library, min_set_size=3).to_csv(single)
-        with open(single, encoding="utf-8") as handle:
-            header = handle.readline().strip()
         check(
-            header.startswith("term_id"),
+            data_lines(single)[0].startswith("term_id"),
             "to_csv omits the cluster column for a single query",
         )
 
@@ -326,8 +331,7 @@ def test_tables() -> None:
     with tempfile.TemporaryDirectory() as directory:
         path = os.path.join(directory, "out.tsv")
         results.to_tsv(path)
-        with open(path, encoding="utf-8") as handle:
-            lines = handle.read().splitlines()
+        lines = data_lines(path)
 
         check(lines[0].split("\t")[0] == "cluster", "to_tsv writes a tab-separated header")
         check(len(lines) == len(results) + 1, "to_tsv writes one line per term")
@@ -340,8 +344,7 @@ def test_tables() -> None:
 
         wide = os.path.join(directory, "wide.tsv")
         results.write_cluster_table(wide, top_n=2)
-        with open(wide, encoding="utf-8") as handle:
-            wide_lines = handle.read().splitlines()
+        wide_lines = data_lines(wide)
         check(
             wide_lines[0].startswith("cluster\tn_tested\tn_significant"),
             "write_cluster_table writes the cluster columns first",
@@ -390,6 +393,123 @@ def test_tables() -> None:
     empty = enrich([], library)
     check(empty.to_text() == "(no enriched terms)", "to_text handles an empty result")
     check("no enriched terms" in empty._repr_html_(), "_repr_html_ handles an empty result")
+
+
+def test_provenance() -> None:
+    """The API retrieval date and the options must reach every output."""
+    section("Provenance headers")
+
+    from togoid.enrichment import read_metadata, timestamp
+
+    stamp = timestamp()
+    check("T" in stamp and len(stamp) >= 19, f"timestamp() is ISO 8601 ({stamp})")
+
+    library = GeneSetLibrary(
+        sets={"T:1": {"CD3D", "CD3E", "CD3G", "LCK", "ZAP70"}},
+        labels={"T:1": "TCR signalling"},
+        route=["ncbigene", "uniprot", "demo"],
+        retrieved_at="2026-01-01T00:00:00+09:00",
+        taxonomy="9606",
+        term_filters={"go_aspect": ["biological_process"]},
+        api_base_url="https://api.example.org",
+    )
+
+    info = library.provenance()
+    check(info["api_retrieved_at"] == "2026-01-01T00:00:00+09:00", "library records the retrieval date")
+    check(info["route"] == "ncbigene -> uniprot -> demo", "library records the route")
+    check(info["taxonomy"] == "9606", "library records the taxonomy")
+    check(
+        info["term_filters"] == "go_aspect=biological_process",
+        "library records the term filters",
+    )
+    check("library_n_terms" in info, "library counts are name-spaced")
+    check("n_terms" not in info, "library counts cannot overwrite the result's n_terms")
+
+    with tempfile.TemporaryDirectory() as directory:
+        path = os.path.join(directory, "lib.json")
+        library.save_json(path)
+        reloaded = GeneSetLibrary.load_json(path)
+        check(
+            reloaded.retrieved_at == library.retrieved_at,
+            "the retrieval date survives the JSON cache",
+        )
+        check(reloaded.taxonomy == "9606", "the taxonomy survives the JSON cache")
+        check(
+            reloaded.term_filters == library.term_filters,
+            "the term filters survive the JSON cache",
+        )
+
+    # filter_by_size must not lose the provenance.
+    check(
+        library.filter_by_size(1).retrieved_at == library.retrieved_at,
+        "filter_by_size keeps the retrieval date",
+    )
+
+    results = enrich_clusters(
+        {"0": ["CD3D", "CD3E", "CD3G", "LCK", "ZAP70"]}, library, min_set_size=3
+    )
+    header = "\n".join(results.header_lines())
+    check("api_retrieved_at: 2026-01-01" in header, "the header carries the retrieval date")
+    check("min_set_size: 3" in header, "the header carries the options used")
+    check("background: library genes" in header, "the header names the background")
+    check(all(line.startswith("#") for line in results.header_lines()), "header lines are comments")
+
+    # The options must be reported accurately.
+    explicit = enrich(
+        ["CD3D", "CD3E", "CD3G"], library, min_set_size=3,
+        background=list(library.genes) + ["EXTRA"],
+    )
+    check(
+        "background: explicit" in "\n".join(explicit.header_lines()),
+        "an explicit background is reported as such",
+    )
+
+    with tempfile.TemporaryDirectory() as directory:
+        path = os.path.join(directory, "out.tsv")
+        results.to_tsv(path)
+
+        metadata = read_metadata(path)
+        check(
+            metadata["api_retrieved_at"] == "2026-01-01T00:00:00+09:00",
+            "read_metadata recovers the retrieval date",
+        )
+        check(metadata["min_set_size"] == "3", "read_metadata recovers the options")
+
+        with open(path, encoding="utf-8") as handle:
+            lines = handle.read().splitlines()
+        comments = [line for line in lines if line.startswith("#")]
+        check(len(comments) > 3, "the header is written above the table")
+        check(
+            lines[len(comments)].startswith("cluster\t"),
+            "the column header follows the comments",
+        )
+
+        # The table must still parse once comments are skipped.
+        import csv as _csv
+
+        with open(path, encoding="utf-8") as handle:
+            data = (line for line in handle if not line.startswith("#"))
+            parsed = list(_csv.DictReader(data, delimiter="\t"))
+        check(len(parsed) == len(results), "the table parses with comments skipped")
+
+        plain = os.path.join(directory, "plain.tsv")
+        results.to_tsv(plain, header=False)
+        with open(plain, encoding="utf-8") as handle:
+            first = handle.readline()
+        check(first.startswith("cluster\t"), "header=False writes no comment lines")
+        check(read_metadata(plain) == {}, "read_metadata returns nothing for a bare file")
+
+        wide = os.path.join(directory, "wide.tsv")
+        results.write_cluster_table(wide, top_n=2)
+        check(
+            read_metadata(wide).get("api_retrieved_at") == "2026-01-01T00:00:00+09:00",
+            "the wide table carries the same header",
+        )
+
+    check(
+        "api_retrieved_at: 2026-01-01" in results.summary(),
+        "the summary carries the header too",
+    )
 
 
 def test_selected_terms_table() -> None:
@@ -726,6 +846,7 @@ def main() -> int:
     test_enrich()
     test_enrich_clusters()
     test_tables()
+    test_provenance()
     test_selected_terms_table()
     test_dataframe_views()
     test_presets()

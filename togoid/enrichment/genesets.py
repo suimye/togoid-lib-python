@@ -11,6 +11,7 @@ import json
 import os
 import time
 import warnings
+from datetime import datetime
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set
 
 from .._ids import local_id
@@ -18,7 +19,21 @@ from ..annotations import AnnotationsConverter
 from ..converter import TogoIDConverter
 from ..label_converter import LabelConverter
 
-__all__ = ["GeneSetLibrary", "build_gene_sets", "map_labels_to_ids"]
+__all__ = ["GeneSetLibrary", "build_gene_sets", "map_labels_to_ids", "timestamp"]
+
+
+def timestamp() -> str:
+    """
+    Current local time as an ISO 8601 string with an offset.
+
+    Used to record when the TogoID API was queried: the annotation databases
+    behind it are updated, so a result is only reproducible together with the
+    date it was retrieved.
+
+    Returns:
+        A string such as ``"2026-09-17T18:42:31+09:00"``.
+    """
+    return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
 class GeneSetLibrary:
@@ -35,6 +50,12 @@ class GeneSetLibrary:
         unmapped: Input genes that could not be resolved to a ``route[0]`` ID.
         route: The conversion route used.
         target_dataset: The dataset the terms come from (``route[-1]``).
+        retrieved_at: When the TogoID API was queried, as an ISO 8601 string.
+            Preserved across :meth:`save_json` and :meth:`load_json`, so a cached
+            library keeps reporting the date its contents actually came from.
+        taxonomy: Taxonomy ID used when resolving labels.
+        term_filters: Annotation filters applied to the terms.
+        api_base_url: The API endpoint the library was built against.
     """
 
     def __init__(
@@ -45,6 +66,10 @@ class GeneSetLibrary:
         unmapped: Optional[Sequence[str]] = None,
         route: Optional[Sequence[str]] = None,
         target_dataset: Optional[str] = None,
+        retrieved_at: Optional[str] = None,
+        taxonomy: Optional[str] = None,
+        term_filters: Optional[Mapping[str, Sequence[str]]] = None,
+        api_base_url: Optional[str] = None,
     ):
         self.sets: Dict[str, Set[str]] = {
             term: set(genes) for term, genes in (sets or {}).items()
@@ -54,6 +79,12 @@ class GeneSetLibrary:
         self.unmapped: List[str] = list(unmapped or [])
         self.route: List[str] = list(route or [])
         self.target_dataset: str = target_dataset or (self.route[-1] if self.route else "")
+        self.retrieved_at: Optional[str] = retrieved_at
+        self.taxonomy: Optional[str] = taxonomy
+        self.term_filters: Dict[str, List[str]] = {
+            k: list(v) for k, v in (term_filters or {}).items()
+        }
+        self.api_base_url: Optional[str] = api_base_url
 
     # ------------------------------------------------------------------ #
     # Basic container behaviour
@@ -95,6 +126,36 @@ class GeneSetLibrary:
                 reverse.setdefault(gene, set()).add(term)
         return reverse
 
+    def provenance(self) -> Dict[str, Any]:
+        """
+        Where this library came from, for recording in output headers.
+
+        Returns:
+            A dict of plain strings, omitting anything that is not known.
+        """
+        info: Dict[str, Any] = {}
+        if self.retrieved_at:
+            info["api_retrieved_at"] = self.retrieved_at
+        if self.api_base_url:
+            info["api_base_url"] = self.api_base_url
+        if self.route:
+            info["route"] = " -> ".join(self.route)
+        if self.target_dataset:
+            info["target_dataset"] = self.target_dataset
+        if self.taxonomy:
+            info["taxonomy"] = self.taxonomy
+        if self.term_filters:
+            info["term_filters"] = "; ".join(
+                f"{field}={','.join(values)}" for field, values in self.term_filters.items()
+            )
+        # Prefixed, because a result written from this library reports its own
+        # n_terms and these must not overwrite each other in the header.
+        info["library_n_terms"] = len(self.sets)
+        info["library_n_genes"] = len(self.genes)
+        if self.unmapped:
+            info["library_n_unmapped_genes"] = len(self.unmapped)
+        return info
+
     def label(self, term_id: str) -> str:
         """Label for a term, falling back to the term ID when unknown."""
         return self.labels.get(term_id, term_id)
@@ -126,6 +187,10 @@ class GeneSetLibrary:
             unmapped=self.unmapped,
             route=self.route,
             target_dataset=self.target_dataset,
+            retrieved_at=self.retrieved_at,
+            taxonomy=self.taxonomy,
+            term_filters=self.term_filters,
+            api_base_url=self.api_base_url,
         )
 
     # ------------------------------------------------------------------ #
@@ -172,6 +237,12 @@ class GeneSetLibrary:
         payload = {
             "route": self.route,
             "target_dataset": self.target_dataset,
+            # The retrieval date travels with the cache: reloading it must not
+            # make a months-old library look like it was fetched today.
+            "retrieved_at": self.retrieved_at,
+            "taxonomy": self.taxonomy,
+            "term_filters": self.term_filters,
+            "api_base_url": self.api_base_url,
             "labels": self.labels,
             "id_map": self.id_map,
             "unmapped": self.unmapped,
@@ -203,6 +274,10 @@ class GeneSetLibrary:
             unmapped=payload.get("unmapped", []),
             route=payload.get("route", []),
             target_dataset=payload.get("target_dataset"),
+            retrieved_at=payload.get("retrieved_at"),
+            taxonomy=payload.get("taxonomy"),
+            term_filters=payload.get("term_filters"),
+            api_base_url=payload.get("api_base_url"),
         )
 
 
@@ -442,6 +517,12 @@ def build_gene_sets(
     target_dataset = route[-1]
     unique_genes = list(dict.fromkeys(genes))
 
+    # Recorded before the first request, so it reflects the state of the API
+    # this library was actually built from.
+    retrieved_at = timestamp()
+    client = converter or TogoIDConverter()
+    api_base_url = getattr(client, "api_base_url", None)
+
     _log(verbose, "=" * 60)
     _log(verbose, f"Building gene sets: {' -> '.join(route)}")
     _log(verbose, "=" * 60)
@@ -464,7 +545,13 @@ def build_gene_sets(
     if not id_map:
         _log(verbose, "No genes could be resolved; returning an empty library.")
         return GeneSetLibrary(
-            route=route, target_dataset=target_dataset, unmapped=unmapped
+            route=route,
+            target_dataset=target_dataset,
+            unmapped=unmapped,
+            retrieved_at=retrieved_at,
+            taxonomy=taxonomy,
+            term_filters=term_filters,
+            api_base_url=api_base_url,
         )
 
     # One source ID can come from several input symbols (synonyms), so keep a
@@ -477,7 +564,6 @@ def build_gene_sets(
 
     # Step 2: walk the route to collect (source ID, term ID) pairs.
     sets: Dict[str, Set[str]] = {}
-    client = converter or TogoIDConverter()
     convert_failures: List[Exception] = []
     total_batches = (len(source_ids) + convert_batch_size - 1) // convert_batch_size
     _log(
@@ -530,6 +616,10 @@ def build_gene_sets(
             target_dataset=target_dataset,
             id_map=id_map,
             unmapped=unmapped,
+            retrieved_at=retrieved_at,
+            taxonomy=taxonomy,
+            term_filters=term_filters,
+            api_base_url=api_base_url,
         )
 
     # Step 3: annotate the terms with labels (and any fields used for filtering).
@@ -572,6 +662,10 @@ def build_gene_sets(
         unmapped=unmapped,
         route=route,
         target_dataset=target_dataset,
+        retrieved_at=retrieved_at,
+        taxonomy=taxonomy,
+        term_filters=term_filters,
+        api_base_url=api_base_url,
     )
     _log(verbose, f"Done: {library!r}")
     return library

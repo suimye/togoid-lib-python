@@ -26,8 +26,9 @@ from .analysis import (
     EnrichmentRow,
     enrich,
     enrich_clusters,
+    read_metadata,
 )
-from .genesets import GeneSetLibrary, build_gene_sets, map_labels_to_ids
+from .genesets import GeneSetLibrary, build_gene_sets, map_labels_to_ids, timestamp
 from .plot import (
     cluster_centroids,
     plot_umap_centroids,
@@ -50,6 +51,7 @@ __all__ = [
     "GeneSetLibrary",
     "build_gene_sets",
     "map_labels_to_ids",
+    "timestamp",
     # presets
     "ROUTES",
     "GO_ASPECTS",
@@ -64,6 +66,7 @@ __all__ = [
     "ClusterEnrichmentResult",
     "EnrichmentRow",
     "RESULT_COLUMNS",
+    "read_metadata",
     # statistics
     "hypergeometric_sf",
     "benjamini_hochberg",

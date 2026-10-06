@@ -15,8 +15,10 @@ table from step 1 and the enrichment CSV from step 3.
 """
 import argparse
 import csv
+import glob
 import os
-from typing import Any, Dict, List
+from datetime import date
+from typing import Any, Dict, List, Optional, Tuple
 
 import matplotlib
 
@@ -26,8 +28,10 @@ matplotlib.use("Agg")
 from togoid.enrichment import (
     plot_umap_centroids,
     plot_umap_enrichment,
+    read_metadata,
     select_terms,
     selected_terms_table,
+    timestamp,
 )
 
 
@@ -68,6 +72,15 @@ def parse_arguments() -> argparse.Namespace:
         action="store_true",
         help="Skip the TSV tables written beside each figure",
     )
+    parser.add_argument(
+        "--date-suffix",
+        default=date.today().strftime("%Y%m%d"),
+        help=(
+            "Date stamp added to output file names, so a re-run against an "
+            "updated API does not overwrite an earlier result "
+            "(default: today, YYYYMMDD). Pass an empty string to omit it."
+        ),
+    )
     parser.add_argument("--dpi", type=int, default=200, help="Raster resolution for the PNG output")
     parser.add_argument(
         "--formats", default="pdf,png", help="Comma-separated output formats (default: pdf,png)"
@@ -99,31 +112,68 @@ def read_umap(results_dir: str) -> Dict[str, List[Any]]:
     return embedding
 
 
-def read_enrichment(results_dir: str, target: str) -> List[Dict[str, Any]]:
+def find_enrichment_file(results_dir: str, target: str) -> Optional[str]:
     """
-    Read one enrichment CSV written by step 3.
+    Locate step 3's output for one target.
+
+    Step 3 date-stamps its files, so pick the most recent one rather than
+    guessing today's date; a plain unstamped name still works.
 
     Args:
-        results_dir: Directory holding the CSV.
+        results_dir: Directory holding the file.
         target: Database name used in the file name.
 
     Returns:
-        List of row dictionaries with numeric p-value and FDR.
+        The path, or ``None`` when nothing matches.
     """
-    path = os.path.join(results_dir, f"03_enrichment_{target}_all.csv")
+    patterns = [
+        f"03_enrichment_{target}_all*.tsv",
+        f"03_enrichment_{target}_all*.csv",   # files from an older run
+    ]
+    for pattern in patterns:
+        matches = sorted(glob.glob(os.path.join(results_dir, pattern)))
+        if matches:
+            return matches[-1]
+    return None
+
+
+def read_enrichment(path: str) -> Tuple[List[Dict[str, Any]], Dict[str, str]]:
+    """
+    Read one enrichment table written by step 3, header included.
+
+    Args:
+        path: Path to the table.
+
+    Returns:
+        Tuple of ``(rows, metadata)``. The metadata carries the date the TogoID
+        API was queried, which this step passes on to its own outputs.
+    """
+    metadata = read_metadata(path)
+    delimiter = "\t" if path.endswith(".tsv") else ","
+
     rows: List[Dict[str, Any]] = []
     with open(path, newline="", encoding="utf-8") as handle:
-        for row in csv.DictReader(handle):
+        # Skip the "#" provenance header; csv has no notion of comment lines.
+        data = (line for line in handle if not line.startswith("#"))
+        for row in csv.DictReader(data, delimiter=delimiter):
             row["pvalue"] = float(row["pvalue"])
             row["fdr"] = float(row["fdr"])
             rows.append(row)
+
     print(f"  loaded {len(rows)} enrichment rows from {path}")
-    return rows
+    if metadata.get("api_retrieved_at"):
+        print(f"  TogoID API retrieved on {metadata['api_retrieved_at']}")
+    return rows, metadata
 
 
-def write_tsv(rows: List[Dict[str, Any]], path: str, columns: List[str]) -> None:
+def write_tsv(
+    rows: List[Dict[str, Any]],
+    path: str,
+    columns: List[str],
+    header: List[str],
+) -> None:
     """
-    Write rows to a tab-separated file.
+    Write rows to a tab-separated file, behind a ``#`` provenance header.
 
     Tabs rather than commas: term labels routinely contain commas, which a CSV
     has to quote and some spreadsheet imports then mis-parse.
@@ -132,8 +182,11 @@ def write_tsv(rows: List[Dict[str, Any]], path: str, columns: List[str]) -> None
         rows: Rows to write.
         path: Destination file path.
         columns: Column order.
+        header: Comment lines written above the table.
     """
     with open(path, "w", newline="", encoding="utf-8") as handle:
+        for line in header:
+            handle.write(f"# {line}\n")
         writer = csv.DictWriter(
             handle, fieldnames=columns, extrasaction="ignore", delimiter="\t"
         )
@@ -143,8 +196,48 @@ def write_tsv(rows: List[Dict[str, Any]], path: str, columns: List[str]) -> None
     print(f"  wrote {path}")
 
 
+def build_header(metadata: Dict[str, str], args: argparse.Namespace, top_n: int) -> List[str]:
+    """
+    Build the provenance header for the tables this step writes.
+
+    It carries step 3's header forward — above all the date the TogoID API was
+    queried — and adds the options used here, so the file explains itself.
+
+    Args:
+        metadata: Header read back from step 3's output.
+        args: Parsed command-line arguments.
+        top_n: Terms per cluster drawn on the figure.
+
+    Returns:
+        Comment lines, without the leading "#".
+    """
+    lines = ["togoid enrichment: terms drawn on the UMAP figure"]
+    lines.append(f"figure_generated_at: {timestamp()}")
+    for key in (
+        "api_retrieved_at", "api_base_url", "route", "target_dataset",
+        "taxonomy", "term_filters", "min_set_size", "max_set_size",
+        "background_size", "background", "togoid_version",
+    ):
+        if metadata.get(key):
+            lines.append(f"{key}: {metadata[key]}")
+
+    lines.append(f"selection: top {top_n} terms per cluster")
+    lines.append(f"fdr_cutoff: {args.fdr_cutoff}")
+    if args.pval_cutoff is not None:
+        lines.append(f"pval_cutoff: {args.pval_cutoff}")
+    if args.clusters:
+        lines.append(f"clusters: {args.clusters}")
+    lines.append(f"show_centroids: {not args.no_centroids}")
+    return lines
+
+
 def write_tables(
-    rows: List[Dict[str, Any]], results_dir: str, stem: str, top_n: int, **filters
+    rows: List[Dict[str, Any]],
+    results_dir: str,
+    stem: str,
+    top_n: int,
+    header: List[str],
+    **filters,
 ) -> None:
     """
     Write the terms drawn on a figure as long- and wide-format TSV tables.
@@ -157,6 +250,7 @@ def write_tables(
         results_dir: Output directory.
         stem: File name stem shared with the figure.
         top_n: Terms per cluster, used for the wide table's columns.
+        header: Provenance comment lines written above each table.
         **filters: Passed through to ``select_terms``.
     """
     selected = select_terms(rows, top_n=top_n, **filters)
@@ -171,7 +265,7 @@ def write_tables(
         "query_size", "background_size", "pvalue", "fdr", "fold_enrichment", "genes",
     ]
     long_columns = [c for c in long_columns if c in long_rows[0]]
-    write_tsv(long_rows, os.path.join(results_dir, f"{stem}.tsv"), long_columns)
+    write_tsv(long_rows, os.path.join(results_dir, f"{stem}.tsv"), long_columns, header)
 
     # Wide: one row per cluster, its best terms side by side. This is the shape
     # you want when labelling clusters or reading the figure as a table.
@@ -193,7 +287,12 @@ def write_tables(
             wide[f"top{index}_fdr"] = f"{float(term['fdr']):.3e}" if term else ""
         wide_rows.append(wide)
 
-    write_tsv(wide_rows, os.path.join(results_dir, f"{stem}_by_cluster.tsv"), wide_columns)
+    write_tsv(
+        wide_rows,
+        os.path.join(results_dir, f"{stem}_by_cluster.tsv"),
+        wide_columns,
+        header + [f"table: one row per cluster, top {top_n} terms"],
+    )
 
 
 def save_figure(fig, results_dir: str, stem: str, formats: List[str], dpi: int) -> None:
@@ -229,13 +328,15 @@ def main() -> int:
         else None
     )
 
+    suffix = f"_{args.date_suffix}" if args.date_suffix else ""
+
     # A reference figure showing where the labels will be anchored.
     fig = plot_umap_centroids(
         embedding,
         title="PBMC clusters and centroids",
         centroid_marker=args.centroid_marker,
     )
-    save_figure(fig, args.results_dir, "04_umap_centroids", formats, args.dpi)
+    save_figure(fig, args.results_dir, f"04_umap_centroids{suffix}", formats, args.dpi)
 
     titles = {
         "reactome": "Enriched Reactome pathways",
@@ -245,7 +346,12 @@ def main() -> int:
 
     for target in [t.strip() for t in args.targets.split(",") if t.strip()]:
         print(f"\nTarget: {target}")
-        rows = read_enrichment(args.results_dir, target)
+
+        path = find_enrichment_file(args.results_dir, target)
+        if path is None:
+            print(f"  no step 3 output found for {target}; skipping")
+            continue
+        rows, metadata = read_enrichment(path)
 
         fig = plot_umap_enrichment(
             embedding,
@@ -262,7 +368,7 @@ def main() -> int:
             centroid_size=args.centroid_size,
             verbose=True,
         )
-        stem = f"04_umap_enrichment_{target}_top{args.top_n}"
+        stem = f"04_umap_enrichment_{target}_top{args.top_n}{suffix}"
         save_figure(fig, args.results_dir, stem, formats, args.dpi)
 
         if not args.no_tables:
@@ -271,6 +377,7 @@ def main() -> int:
                 args.results_dir,
                 stem,
                 top_n=args.top_n,
+                header=build_header(metadata, args, args.top_n),
                 fdr_cutoff=args.fdr_cutoff,
                 pval_cutoff=args.pval_cutoff,
                 clusters=clusters,

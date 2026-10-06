@@ -9,7 +9,7 @@ import os
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
 
-from .genesets import GeneSetLibrary
+from .genesets import GeneSetLibrary, timestamp
 from .stats import benjamini_hochberg, fold_enrichment, hypergeometric_sf
 
 __all__ = [
@@ -19,6 +19,7 @@ __all__ = [
     "enrich",
     "enrich_clusters",
     "RESULT_COLUMNS",
+    "read_metadata",
 ]
 
 #: Column order used for every table this module produces.
@@ -107,13 +108,45 @@ class _BaseResult:
             columns.remove("cluster")
         return columns
 
-    def to_csv(self, path: str, sep: str = ",") -> str:
+    def header_lines(self) -> List[str]:
+        """
+        Build the ``#``-prefixed provenance header for a written table.
+
+        The TogoID API sits in front of annotation databases that are updated, so
+        the same analysis run a month later can legitimately give different
+        numbers. Recording when the API was queried, and with what options, is
+        what makes a result file interpretable later.
+
+        Returns:
+            A list of comment lines, without trailing newlines.
+        """
+        from .. import __version__
+
+        info: Dict[str, Any] = {
+            "generated_at": timestamp(),
+            "togoid_version": __version__,
+        }
+        info.update(self.metadata)
+        info["n_terms"] = len(self.rows)
+        clusters = {row.cluster for row in self.rows if row.cluster is not None}
+        if clusters:
+            info["n_clusters"] = len(clusters)
+
+        lines = ["# togoid enrichment results"]
+        lines += [f"# {key}: {value}" for key, value in info.items()]
+        return lines
+
+    def to_csv(self, path: str, sep: str = ",", header: bool = True) -> str:
         """
         Write the result to a delimited text file.
 
         Args:
             path: Destination file path.
             sep: Field separator; ``","`` by default.
+            header: Write the ``#`` provenance header returned by
+                :meth:`header_lines`. Read such a file back with
+                ``pandas.read_csv(path, sep=sep, comment="#")``, or pass
+                ``header=False`` for consumers that cannot skip comment lines.
 
         Returns:
             The path that was written.
@@ -124,6 +157,8 @@ class _BaseResult:
 
         columns = self.columns()
         with open(path, "w", newline="", encoding="utf-8") as handle:
+            if header:
+                handle.write("\n".join(self.header_lines()) + "\n")
             writer = csv.DictWriter(
                 handle, fieldnames=columns, extrasaction="ignore", delimiter=sep
             )
@@ -132,7 +167,7 @@ class _BaseResult:
                 writer.writerow(row)
         return path
 
-    def to_tsv(self, path: str) -> str:
+    def to_tsv(self, path: str, header: bool = True) -> str:
         """
         Write the result to a tab-separated file.
 
@@ -141,11 +176,12 @@ class _BaseResult:
 
         Args:
             path: Destination file path.
+            header: Write the ``#`` provenance header.
 
         Returns:
             The path that was written.
         """
-        return self.to_csv(path, sep="\t")
+        return self.to_csv(path, sep="\t", header=header)
 
     # ------------------------------------------------------------------ #
     # Human-readable views
@@ -299,9 +335,15 @@ class _BaseResult:
 class EnrichmentResult(_BaseResult):
     """Enrichment results for a single query gene list."""
 
-    def __init__(self, rows: Sequence[EnrichmentRow], query_genes: Sequence[str]):
+    def __init__(
+        self,
+        rows: Sequence[EnrichmentRow],
+        query_genes: Sequence[str],
+        metadata: Optional[Mapping[str, Any]] = None,
+    ):
         self.rows = list(rows)
         self.query_genes = list(query_genes)
+        self.metadata: Dict[str, Any] = dict(metadata or {})
 
     def __repr__(self) -> str:
         return f"<EnrichmentResult terms={len(self.rows)} query={len(self.query_genes)}>"
@@ -318,19 +360,29 @@ class EnrichmentResult(_BaseResult):
             A new ``EnrichmentResult``.
         """
         kept = [row for row in self.rows if getattr(row, use) < alpha]
-        return EnrichmentResult(kept, self.query_genes)
+        return EnrichmentResult(kept, self.query_genes, self.metadata)
 
     def top(self, n: int) -> "EnrichmentResult":
         """Return the ``n`` most significant terms."""
-        return EnrichmentResult(self.rows[:n], self.query_genes)
+        return EnrichmentResult(self.rows[:n], self.query_genes, self.metadata)
 
 
 class ClusterEnrichmentResult(_BaseResult):
     """Enrichment results for several clusters, concatenated."""
 
-    def __init__(self, per_cluster: Mapping[str, EnrichmentResult]):
+    def __init__(
+        self,
+        per_cluster: Mapping[str, EnrichmentResult],
+        metadata: Optional[Mapping[str, Any]] = None,
+    ):
         self.per_cluster: Dict[str, EnrichmentResult] = dict(per_cluster)
         self.rows = [row for result in self.per_cluster.values() for row in result.rows]
+        if metadata is None:
+            # Inherit from the first cluster: they all come from one analysis.
+            metadata = next(
+                (r.metadata for r in self.per_cluster.values() if r.metadata), {}
+            )
+        self.metadata: Dict[str, Any] = dict(metadata or {})
 
     def __repr__(self) -> str:
         return (
@@ -354,13 +406,15 @@ class ClusterEnrichmentResult(_BaseResult):
             {
                 cluster: result.significant(alpha, use)
                 for cluster, result in self.per_cluster.items()
-            }
+            },
+            self.metadata,
         )
 
     def top(self, n: int) -> "ClusterEnrichmentResult":
         """Keep the ``n`` most significant terms of each cluster."""
         return ClusterEnrichmentResult(
-            {cluster: result.top(n) for cluster, result in self.per_cluster.items()}
+            {cluster: result.top(n) for cluster, result in self.per_cluster.items()},
+            self.metadata,
         )
 
     def to_cluster_table(
@@ -397,7 +451,12 @@ class ClusterEnrichmentResult(_BaseResult):
         return rows
 
     def write_cluster_table(
-        self, path: str, top_n: int = 3, alpha: float = 0.05, sep: str = "\t"
+        self,
+        path: str,
+        top_n: int = 3,
+        alpha: float = 0.05,
+        sep: str = "\t",
+        header: bool = True,
     ) -> str:
         """
         Write the wide per-cluster table from :meth:`to_cluster_table`.
@@ -407,6 +466,7 @@ class ClusterEnrichmentResult(_BaseResult):
             top_n: Number of terms to include per cluster.
             alpha: FDR threshold used to pick and count the terms.
             sep: Field separator; tab by default.
+            header: Write the ``#`` provenance header.
 
         Returns:
             The path that was written.
@@ -421,6 +481,10 @@ class ClusterEnrichmentResult(_BaseResult):
             columns += [f"top{index}_term_id", f"top{index}_term_label", f"top{index}_fdr"]
 
         with open(path, "w", newline="", encoding="utf-8") as handle:
+            if header:
+                lines = self.header_lines()
+                lines.append(f"# table: top {top_n} terms per cluster, FDR < {alpha}")
+                handle.write("\n".join(lines) + "\n")
             writer = csv.DictWriter(
                 handle, fieldnames=columns, extrasaction="ignore", delimiter=sep
             )
@@ -444,7 +508,8 @@ class ClusterEnrichmentResult(_BaseResult):
         Returns:
             A multi-line report suitable for printing or writing to a file.
         """
-        lines = ["Enrichment summary", "=" * 60, ""]
+        lines = self.header_lines()
+        lines += ["", "Enrichment summary", "=" * 60, ""]
         for cluster, result in self.per_cluster.items():
             significant = result.significant(alpha)
             lines.append(f"Cluster {cluster}:")
@@ -495,8 +560,27 @@ def enrich(
     background_size = len(background_set)
     query_size = len(query_set)
 
+    # The options that shaped these numbers, recorded so a written table can say
+    # how it was produced.
+    metadata: Dict[str, Any] = dict(library.provenance())
+    metadata.update(
+        {
+            "min_set_size": min_set_size,
+            "max_set_size": "none" if max_set_size is None else max_set_size,
+            "min_overlap": min_overlap,
+            "background_size": background_size,
+            # enrich_clusters() resolves the default before calling in, so
+            # compare the sets rather than trusting the argument being None.
+            "background": (
+                "library genes"
+                if background is None or background_set == library.genes
+                else "explicit"
+            ),
+        }
+    )
+
     if background_size == 0 or query_size == 0:
-        return EnrichmentResult([], sorted(query_set))
+        return EnrichmentResult([], sorted(query_set), metadata)
 
     rows: List[EnrichmentRow] = []
     for term_id, members in library.sets.items():
@@ -538,7 +622,7 @@ def enrich(
             row.fdr = adjusted
         rows.sort(key=lambda r: (r.fdr, r.pvalue, -r.fold_enrichment))
 
-    return EnrichmentResult(rows, sorted(query_set))
+    return EnrichmentResult(rows, sorted(query_set), metadata)
 
 
 def enrich_clusters(
@@ -589,6 +673,30 @@ def enrich_clusters(
             )
 
     return ClusterEnrichmentResult(per_cluster)
+
+
+
+def read_metadata(path: str) -> Dict[str, str]:
+    """
+    Read the ``#`` provenance header back from a written table.
+
+    Args:
+        path: Path to a file written by :meth:`_BaseResult.to_csv` or
+            :meth:`_BaseResult.to_tsv`.
+
+    Returns:
+        Mapping of header key to value; empty when the file has no header.
+    """
+    metadata: Dict[str, str] = {}
+    with open(path, "r", encoding="utf-8") as handle:
+        for line in handle:
+            if not line.startswith("#"):
+                break
+            text = line[1:].strip()
+            if ":" in text:
+                key, _, value = text.partition(":")
+                metadata[key.strip()] = value.strip()
+    return metadata
 
 
 def _cluster_sort_key(cluster: Any):

@@ -945,6 +945,57 @@ Step 4 of the example pipeline does this automatically, writing
 `<figure-name>.tsv` and `<figure-name>_by_cluster.tsv` beside every figure, so
 the table and the picture can never disagree.
 
+### Provenance: when the API was queried
+
+The TogoID API sits in front of annotation databases that are updated, so the
+same analysis run a month later can legitimately give different numbers. Every
+written table therefore carries a `#` header recording when the API was queried
+and with what options:
+
+```
+# togoid enrichment results
+# generated_at: 2026-10-06T16:31:01+09:00
+# togoid_version: 1.0.0
+# api_retrieved_at: 2026-10-06T16:29:38+09:00
+# api_base_url: https://api.togoid.dbcls.jp
+# route: ncbigene -> uniprot -> reactome_pathway
+# target_dataset: reactome_pathway
+# taxonomy: 9606
+# min_set_size: 5
+# max_set_size: 500
+# background_size: 727
+# background: library genes
+cluster	term_id	term_label	...
+```
+
+`generated_at` is when the file was written; `api_retrieved_at` is when the gene
+sets were actually fetched. They differ whenever a cached library is reused — the
+retrieval date travels with the cache, so reloading a months-old library does not
+make it look fresh.
+
+```python
+from togoid.enrichment import read_metadata
+
+read_metadata("enrichment.tsv")["api_retrieved_at"]
+```
+
+Read the data past the header with `pandas.read_csv(path, sep="\t", comment="#")`,
+or write without one via `to_tsv(path, header=False)`.
+
+Output file names are date-stamped, so re-running against an updated API adds a
+file rather than overwriting the earlier result:
+
+```
+results/03_genesets_reactome_20261006.json
+results/03_enrichment_reactome_all_20261006.tsv
+results/04_umap_enrichment_reactome_top3_20261006.pdf
+results/04_umap_enrichment_reactome_top3_20261006.tsv
+```
+
+Both example steps take `--date-suffix` (default today, `""` to omit it). Step 4
+picks the most recent step-3 file automatically and passes its `api_retrieved_at`
+into its own headers.
+
 ### Single-Cell Adapters
 
 The core knows nothing about scanpy or Seurat; these adapters do the translation

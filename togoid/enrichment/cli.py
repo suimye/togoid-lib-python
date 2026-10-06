@@ -98,9 +98,17 @@ def add_enrich_parser(subparsers) -> None:
     parser.add_argument("--output", help="Write results to this CSV file (default: stdout)")
     parser.add_argument(
         "--format",
-        choices=["csv", "json", "summary"],
+        choices=["csv", "tsv", "json", "summary"],
         default="csv",
         help="Output format (default: csv)",
+    )
+    parser.add_argument(
+        "--no-header",
+        action="store_true",
+        help=(
+            "Omit the '#' provenance header (API retrieval date and options) "
+            "from csv/tsv output, for consumers that cannot skip comment lines"
+        ),
     )
     parser.add_argument("--quiet", action="store_true", help="Suppress progress messages")
 
@@ -258,12 +266,17 @@ def handle_enrich(args, api_url: Optional[str] = None) -> int:
                 handle.write(text)
         else:
             print(text)
-    else:  # csv
+    else:  # csv or tsv
+        separator = "\t" if args.format == "tsv" else ","
         rows = filtered.to_rows()
         if args.output:
-            filtered.to_csv(args.output)
+            filtered.to_csv(args.output, sep=separator, header=not args.no_header)
         elif rows:
-            writer = csv.DictWriter(sys.stdout, fieldnames=list(rows[0]))
+            if not args.no_header:
+                print("\n".join(filtered.header_lines()))
+            writer = csv.DictWriter(
+                sys.stdout, fieldnames=list(rows[0]), delimiter=separator
+            )
             writer.writeheader()
             writer.writerows(rows)
 

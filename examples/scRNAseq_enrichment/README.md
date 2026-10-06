@@ -110,9 +110,9 @@ BH-FDR correction, against a background of every marker gene in the experiment.
 
 | File | Contents |
 |---|---|
-| `03_genesets_<target>.json` | The gene-set library, cached |
-| `03_enrichment_<target>_all.csv` | Every tested term |
-| `03_enrichment_<target>_significant.csv` | FDR < 0.05 only |
+| `03_genesets_<target>.json` | The gene-set library, cached (with its retrieval date) |
+| `03_enrichment_<target>_all.tsv` | Every tested term |
+| `03_enrichment_<target>_significant.tsv` | FDR < 0.05 only |
 | `03_enrichment_<target>_summary.txt` | Readable per-cluster report |
 
 Useful options: `--targets reactome,go`, `--go-aspect molecular_function`,
@@ -141,9 +141,33 @@ without overlapping are dropped rather than drawn illegibly.
 The TSV tables are written with the same filters the figure used, so the two can
 never disagree. Tabs rather than commas, because term labels contain commas.
 
+Each table opens with a `#` header giving the date the TogoID API was queried and
+the options used — step 4 reads that date out of step 3's output and passes it
+on. Read the data past it with `comment="#"` (pandas) or
+`comment.char = "#"` (R).
+
 Useful options: `--top-n 5`, `--fdr-cutoff 0.01`, `--clusters 0,3,7`,
 `--max-label-chars 30`, `--formats pdf` (skip the PNG), `--no-tables` (skip the
 TSVs), `--no-centroids` (hide the centroid markers).
+
+## Output file names carry the run date
+
+The TogoID API is a moving target: the annotation databases behind it are
+updated, so the same pipeline can legitimately give different numbers later.
+Every output is therefore date-stamped, and re-running adds a file rather than
+overwriting the earlier result:
+
+```
+results/03_genesets_reactome_20261006.json
+results/03_enrichment_reactome_all_20261006.tsv
+results/04_umap_enrichment_reactome_top3_20261006.pdf
+results/04_umap_enrichment_reactome_top3_20261006.tsv
+```
+
+Step 4 finds the most recent step-3 file by itself, so the two steps do not have
+to be run on the same day.
+
+Pass `--date-suffix ""` to either step to turn the stamp off.
 
 ## Reading the results
 

@@ -9,6 +9,7 @@ serves Reactome, GO and MONDO by changing nothing but the route.
 """
 import argparse
 import os
+from datetime import date
 from typing import Dict, List
 
 from togoid.enrichment import GeneSetLibrary, build_gene_sets, enrich_clusters
@@ -60,7 +61,31 @@ def parse_arguments() -> argparse.Namespace:
         action="store_true",
         help="Reuse cached gene-set JSON files instead of querying the API again",
     )
+    parser.add_argument(
+        "--date-suffix",
+        default=date.today().strftime("%Y%m%d"),
+        help=(
+            "Date stamp added to output file names, so a re-run against an "
+            "updated API does not overwrite an earlier result "
+            "(default: today, YYYYMMDD). Pass an empty string to omit it."
+        ),
+    )
     return parser.parse_args()
+
+
+def stamped(name: str, suffix: str, extension: str) -> str:
+    """
+    Build a file name with an optional date stamp before the extension.
+
+    Args:
+        name: File name stem.
+        suffix: Date stamp, or an empty string for none.
+        extension: Extension without the leading dot.
+
+    Returns:
+        The file name.
+    """
+    return f"{name}_{suffix}.{extension}" if suffix else f"{name}.{extension}"
 
 
 def load_markers(results_dir: str) -> Dict[str, List[str]]:
@@ -110,11 +135,15 @@ def run_target(
     print(f"Target: {name}  ({' -> '.join(config['route'])})")
     print("=" * 60)
 
-    cache_path = os.path.join(args.results_dir, f"03_genesets_{name}.json")
+    cache_path = os.path.join(
+        args.results_dir, stamped(f"03_genesets_{name}", args.date_suffix, "json")
+    )
 
     if args.reuse_genesets and os.path.exists(cache_path):
         library = GeneSetLibrary.load_json(cache_path)
         print(f"Reusing cached gene sets from {cache_path}: {library!r}")
+        if library.retrieved_at:
+            print(f"  (retrieved from the API on {library.retrieved_at})")
     else:
         library = build_gene_sets(
             all_genes,
@@ -138,16 +167,25 @@ def run_target(
         verbose=True,
     )
 
-    all_path = os.path.join(args.results_dir, f"03_enrichment_{name}_all.csv")
-    results.to_csv(all_path)
+    # Every file carries a "#" header with the API retrieval date and the options
+    # used, so a result stays interpretable after the API has moved on.
+    all_path = os.path.join(
+        args.results_dir, stamped(f"03_enrichment_{name}_all", args.date_suffix, "tsv")
+    )
+    results.to_tsv(all_path)
     print(f"Wrote {len(results)} rows to {all_path}")
 
     significant = results.significant(0.05)
-    sig_path = os.path.join(args.results_dir, f"03_enrichment_{name}_significant.csv")
-    significant.to_csv(sig_path)
+    sig_path = os.path.join(
+        args.results_dir,
+        stamped(f"03_enrichment_{name}_significant", args.date_suffix, "tsv"),
+    )
+    significant.to_tsv(sig_path)
     print(f"Wrote {len(significant)} significant rows to {sig_path}")
 
-    summary_path = os.path.join(args.results_dir, f"03_enrichment_{name}_summary.txt")
+    summary_path = os.path.join(
+        args.results_dir, stamped(f"03_enrichment_{name}_summary", args.date_suffix, "txt")
+    )
     with open(summary_path, "w", encoding="utf-8") as handle:
         handle.write(results.summary())
     print(f"Wrote {summary_path}")

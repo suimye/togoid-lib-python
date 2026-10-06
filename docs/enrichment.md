@@ -273,6 +273,66 @@ results.write_cluster_table("by_cluster.tsv", top_n=3)
 
 This is the shape you want when labelling clusters or reading a figure as a table.
 
+### Provenance headers
+
+The TogoID API sits in front of annotation databases that are updated, so the
+same analysis run a month later can legitimately give different numbers. Every
+written table carries a `#` header saying when the API was queried and with what
+options, so the file stays interpretable later.
+
+```python
+results.header_lines()               # the lines that will be written
+results.to_tsv("enrichment.tsv")     # header included by default
+results.to_tsv("plain.tsv", header=False)
+```
+
+| Key | Meaning |
+|---|---|
+| `generated_at` | When this file was written |
+| `api_retrieved_at` | When the gene sets were fetched from TogoID |
+| `api_base_url` | Which endpoint they came from |
+| `route`, `target_dataset`, `taxonomy`, `term_filters` | How they were built |
+| `library_n_terms`, `library_n_genes`, `library_n_unmapped_genes` | Size of the library |
+| `min_set_size`, `max_set_size`, `min_overlap` | Term filters used for the test |
+| `background_size`, `background` | The universe the p-values were computed against |
+| `n_terms`, `n_clusters` | Size of this result |
+
+The two dates differ whenever a cached library is reused: `retrieved_at` travels
+with the JSON, so reloading a months-old library does not make it look fresh.
+
+```python
+library.retrieved_at                  # on the library itself
+read_metadata("enrichment.tsv")       # back out of a written file
+```
+
+Read the data past the header with `pandas.read_csv(path, sep="\t", comment="#")`
+or, without pandas, by filtering the lines:
+
+```python
+import csv
+
+with open(path, encoding="utf-8") as handle:
+    rows = list(csv.DictReader(
+        (line for line in handle if not line.startswith("#")), delimiter="\t"
+    ))
+```
+
+### Date-stamped file names
+
+The example pipeline stamps its outputs with the run date, so re-running against
+an updated API adds a file rather than overwriting the earlier result:
+
+```
+results/03_genesets_reactome_20261006.json
+results/03_enrichment_reactome_all_20261006.tsv
+results/04_umap_enrichment_reactome_top3_20261006.pdf
+results/04_umap_enrichment_reactome_top3_20261006.tsv
+```
+
+Both steps take `--date-suffix` (default today's date, `""` to omit it). Step 4
+locates the most recent step-3 file by itself, reads its header, and carries
+`api_retrieved_at` into its own outputs.
+
 ### Matching a figure exactly
 
 `plot_umap_enrichment` picks the terms it draws with `select_terms`. Call it
