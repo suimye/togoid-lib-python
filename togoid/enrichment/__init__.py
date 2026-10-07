@@ -44,7 +44,13 @@ from .presets import (
     mondo_gene_sets,
     reactome_gene_sets,
 )
-from .stats import benjamini_hochberg, fold_enrichment, hypergeometric_sf
+from .stats import (
+    benjamini_hochberg,
+    fdr,
+    fold_enrichment,
+    hypergeometric_pvalue,
+    hypergeometric_sf,
+)
 
 __all__ = [
     # gene sets
@@ -71,6 +77,9 @@ __all__ = [
     "hypergeometric_sf",
     "benjamini_hochberg",
     "fold_enrichment",
+    # aliases matching the R implementation's names
+    "hypergeometric_pvalue",
+    "fdr",
     # visualisation
     "plot_umap_enrichment",
     "plot_umap_centroids",

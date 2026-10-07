@@ -13,7 +13,9 @@ __all__ = [
     "log_binomial_coefficient",
     "hypergeometric_pmf",
     "hypergeometric_sf",
+    "hypergeometric_pvalue",
     "benjamini_hochberg",
+    "fdr",
     "fold_enrichment",
 ]
 
@@ -78,6 +80,17 @@ def hypergeometric_sf(k: int, N: int, M: int, n: int) -> float:
     Returns:
         P-value in ``[0, 1]``. Returns 1.0 for ``k <= 0`` (an overlap of zero or
         less is always at least as likely as observed).
+
+    Examples:
+        5 of a 20-gene query fall in a 50-gene term, out of 2000 genes::
+
+            >>> round(hypergeometric_sf(5, 2000, 50, 20), 8)
+            9.316e-05
+
+        An overlap of zero is never surprising::
+
+            >>> hypergeometric_sf(0, 100, 10, 10)
+            1.0
     """
     if k <= 0:
         return 1.0
@@ -112,6 +125,15 @@ def benjamini_hochberg(pvalues: Sequence[float]) -> List[float]:
 
     Returns:
         List of adjusted p-values in the same order as the input.
+
+    Examples:
+        >>> [round(p, 4) for p in benjamini_hochberg([0.01, 0.04, 0.03, 0.005])]
+        [0.02, 0.04, 0.04, 0.02]
+
+        An empty input gives an empty result::
+
+            >>> benjamini_hochberg([])
+            []
     """
     m = len(pvalues)
     if m == 0:
@@ -143,6 +165,14 @@ def fold_enrichment(k: int, N: int, M: int, n: int) -> float:
 
     Returns:
         Fold enrichment, or 0.0 when the expected overlap is zero.
+
+    Examples:
+        The expected overlap is ``n * M / N`` = 10, so 20 observed is 2-fold::
+
+            >>> fold_enrichment(20, 1000, 100, 100)
+            2.0
+            >>> fold_enrichment(5, 100, 0, 10)
+            0.0
     """
     if N <= 0:
         return 0.0
@@ -150,3 +180,20 @@ def fold_enrichment(k: int, N: int, M: int, n: int) -> float:
     if expected <= 0:
         return 0.0
     return k / expected
+
+
+# --------------------------------------------------------------------- #
+# Aliases matching the R implementation
+# --------------------------------------------------------------------- #
+#
+# The R package names these after what they produce rather than after the
+# distribution function or the method: togoid_hypergeometric_pvalue() and
+# togoid_fdr(). Both names are correct, and someone moving between the two
+# implementations should not have to learn two vocabularies, so each function is
+# reachable under either name. The originals stay the canonical ones.
+
+#: Alias of :func:`hypergeometric_sf`, matching R's ``togoid_hypergeometric_pvalue``.
+hypergeometric_pvalue = hypergeometric_sf
+
+#: Alias of :func:`benjamini_hochberg`, matching R's ``togoid_fdr``.
+fdr = benjamini_hochberg
