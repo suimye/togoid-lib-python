@@ -10,7 +10,7 @@ readme = "README.md"
 authors = [
     {name = "DBCLS", email = "noreply@dbcls.jp"}
 ]
-license = {text = "MIT"}
+license = {file = "LICENSE"}
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
