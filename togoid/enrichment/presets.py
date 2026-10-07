@@ -127,6 +127,21 @@ def gene_sets_from_preset(
 
     Raises:
         ValueError: If the preset name is unknown.
+
+    Examples:
+        >>> sorted(ROUTES)
+        ['go', 'mondo', 'reactome']
+        >>> ROUTES["reactome"]
+        ['ncbigene', 'uniprot', 'reactome_pathway']
+        >>> GO_ASPECTS[0]
+        'biological_process'
+
+        An unknown preset is rejected rather than silently ignored::
+
+            >>> gene_sets_from_preset("nope", ["CD3D"])
+            Traceback (most recent call last):
+                ...
+            ValueError: Unknown preset 'nope'. Available: ['go', 'mondo', 'reactome']. For any other database, pass route=[...] to build_gene_sets().
     """
     builders = {
         "reactome": reactome_gene_sets,

@@ -288,6 +288,17 @@ def write_marker_gene_lists(
 
     Returns:
         Mapping of cluster label to the path written.
+
+    Examples:
+        >>> import os, tempfile
+        >>> directory = os.path.join(tempfile.mkdtemp(), "gene_lists")
+        >>> written = write_marker_gene_lists(
+        ...     {"0": ["CD3D", "CD3E"], "1": ["MS4A1"]}, directory
+        ... )
+        >>> sorted(os.path.basename(p) for p in written.values())
+        ['cluster_0_markers.txt', 'cluster_1_markers.txt']
+        >>> open(written["0"]).read().split()
+        ['CD3D', 'CD3E']
     """
     import os
 

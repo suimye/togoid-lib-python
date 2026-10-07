@@ -99,6 +99,15 @@ def cluster_centroids(
 
     Returns:
         Mapping of cluster label to ``{"x", "y", "n_cells"}``.
+
+    Examples:
+        >>> embedding = {
+        ...     "umap_1": [0.0, 2.0, 10.0, 12.0],
+        ...     "umap_2": [0.0, 2.0, 10.0, 12.0],
+        ...     "cluster": ["0", "0", "1", "1"],
+        ... }
+        >>> cluster_centroids(embedding)["0"]
+        {'x': 1.0, 'y': 1.0, 'n_cells': 2}
     """
     xs, ys, clusters = _as_columns(embedding, x_key, y_key, cluster_key)
 
@@ -137,6 +146,15 @@ def spiral_positions(
 
     Returns:
         List of ``(x, y)`` candidate positions, closest to the centre first.
+
+    Examples:
+        The first candidate sits at ``radius_start`` from the centre::
+
+            >>> positions = spiral_positions(0.0, 0.0, 8, 1.0, 1.0)
+            >>> len(positions)
+            8
+            >>> round(math.hypot(*positions[0]), 6)
+            1.0
     """
     positions: List[Tuple[float, float]] = []
     angle = 0.0
@@ -201,6 +219,17 @@ def select_terms(
         Mapping of cluster label to its selected terms. Each term carries the
         original fields plus ``label`` (possibly truncated) and ``weight``
         (``-log10(pvalue)``), sorted most significant first.
+
+    Examples:
+        >>> rows = [
+        ...     {"cluster": "0", "term_id": "A", "term_label": "alpha",
+        ...      "pvalue": 1e-6, "fdr": 1e-5},
+        ...     {"cluster": "0", "term_id": "C", "term_label": "gamma",
+        ...      "pvalue": 0.4, "fdr": 0.5},
+        ... ]
+        >>> selected = select_terms(rows, top_n=None, fdr_cutoff=0.05)
+        >>> [term["term_id"] for term in selected["0"]]
+        ['A']
     """
     wanted = {str(c) for c in clusters} if clusters is not None else None
 
@@ -255,6 +284,17 @@ def selected_terms_table(
     Returns:
         A flat list of dictionaries, ordered by cluster and then significance.
         The layout-only fields (``label``, ``weight``) are dropped.
+
+    Examples:
+        >>> rows = [
+        ...     {"cluster": "1", "term_id": "B", "term_label": "beta",
+        ...      "pvalue": 1e-5, "fdr": 1e-4},
+        ...     {"cluster": "0", "term_id": "A", "term_label": "alpha",
+        ...      "pvalue": 1e-6, "fdr": 1e-5},
+        ... ]
+        >>> selected = select_terms(rows, top_n=None, fdr_cutoff=0.05)
+        >>> [(r["cluster"], r["term_id"]) for r in selected_terms_table(selected)]
+        [('0', 'A'), ('1', 'B')]
     """
     rows: List[Dict[str, Any]] = []
     for cluster in sorted(selected, key=_cluster_sort_key):

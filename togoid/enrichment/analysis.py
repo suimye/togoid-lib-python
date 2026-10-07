@@ -551,6 +551,27 @@ def enrich(
 
     Returns:
         An ``EnrichmentResult`` sorted by FDR, then p-value.
+
+    Examples:
+        >>> from togoid.enrichment import GeneSetLibrary
+        >>> library = GeneSetLibrary(
+        ...     sets={"T:1": {"CD3D", "CD3E", "CD3G", "LCK", "ZAP70"},
+        ...           "B:1": {"MS4A1", "CD79A", "CD79B", "CD19", "BLNK"}},
+        ...     labels={"T:1": "TCR signalling", "B:1": "BCR signalling"},
+        ... )
+        >>> result = enrich(["CD3D", "CD3E", "CD3G", "LCK", "ZAP70"],
+        ...                 library, min_set_size=3)
+        >>> result.rows[0].term_label
+        'TCR signalling'
+        >>> result.rows[0].overlap_count
+        5
+
+        Genes outside the background do not inflate the query::
+
+            >>> padded = enrich(["CD3D", "CD3E", "CD3G", "NOT_A_GENE"],
+            ...                 library, min_set_size=3)
+            >>> padded.rows[0].query_size
+            3
     """
     background_set: Set[str] = set(background) if background is not None else library.genes
     # Testing genes that are not in the universe would inflate the query size
@@ -650,6 +671,28 @@ def enrich_clusters(
 
     Returns:
         A ``ClusterEnrichmentResult`` keyed by cluster label.
+
+    Examples:
+        >>> from togoid.enrichment import GeneSetLibrary
+        >>> library = GeneSetLibrary(
+        ...     sets={"T:1": {"CD3D", "CD3E", "CD3G", "LCK", "ZAP70"},
+        ...           "B:1": {"MS4A1", "CD79A", "CD79B", "CD19", "BLNK"}},
+        ...     labels={"T:1": "TCR signalling", "B:1": "BCR signalling"},
+        ... )
+        >>> results = enrich_clusters(
+        ...     {"1": ["MS4A1", "CD79A", "CD79B", "CD19", "BLNK"],
+        ...      "0": ["CD3D", "CD3E", "CD3G", "LCK", "ZAP70"]},
+        ...     library, min_set_size=3,
+        ... )
+        >>> results.clusters
+        ['0', '1']
+        >>> results["0"].rows[0].term_id
+        'T:1'
+
+        One shared background keeps the FDRs comparable between clusters::
+
+            >>> len({row.background_size for row in results})
+            1
     """
     background_set: Set[str] = set(background) if background is not None else library.genes
 
@@ -686,6 +729,19 @@ def read_metadata(path: str) -> Dict[str, str]:
 
     Returns:
         Mapping of header key to value; empty when the file has no header.
+
+    Examples:
+        >>> import os, tempfile
+        >>> from togoid.enrichment import GeneSetLibrary
+        >>> library = GeneSetLibrary(
+        ...     sets={"T:1": {"CD3D", "CD3E", "CD3G"}},
+        ...     retrieved_at="2026-01-01T00:00:00+09:00",
+        ... )
+        >>> results = enrich(["CD3D", "CD3E", "CD3G"], library, min_set_size=3)
+        >>> path = os.path.join(tempfile.mkdtemp(), "out.tsv")
+        >>> _ = results.to_tsv(path)
+        >>> read_metadata(path)["api_retrieved_at"]
+        '2026-01-01T00:00:00+09:00'
     """
     metadata: Dict[str, str] = {}
     with open(path, "r", encoding="utf-8") as handle:

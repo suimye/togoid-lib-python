@@ -31,7 +31,17 @@ def timestamp() -> str:
     date it was retrieved.
 
     Returns:
-        A string such as ``"2026-09-17T18:42:31+09:00"``.
+        A string such as ``"2026-10-07T18:42:31+09:00"``.
+
+    Examples:
+        The offset carries a colon, as RFC 3339 requires, and matches what the
+        R implementation's ``togoid_timestamp()`` writes::
+
+            >>> stamp = timestamp()
+            >>> len(stamp)
+            25
+            >>> stamp[10]
+            'T'
     """
     return datetime.now().astimezone().isoformat(timespec="seconds")
 
@@ -132,6 +142,20 @@ class GeneSetLibrary:
 
         Returns:
             A dict of plain strings, omitting anything that is not known.
+
+        Examples:
+            >>> library = GeneSetLibrary(
+            ...     sets={"T:1": {"CD3D", "CD3E", "LCK"}},
+            ...     route=["ncbigene", "uniprot", "demo"],
+            ...     retrieved_at="2026-01-01T00:00:00+09:00",
+            ... )
+            >>> info = library.provenance()
+            >>> info["api_retrieved_at"]
+            '2026-01-01T00:00:00+09:00'
+            >>> info["route"]
+            'ncbigene -> uniprot -> demo'
+            >>> info["library_n_terms"]
+            1
         """
         info: Dict[str, Any] = {}
         if self.retrieved_at:
@@ -173,6 +197,13 @@ class GeneSetLibrary:
 
         Returns:
             A new ``GeneSetLibrary``; the original is left untouched.
+
+        Examples:
+            >>> library = GeneSetLibrary(sets={"big": set("abcde"), "small": {"a"}})
+            >>> sorted(library.filter_by_size(min_size=3).sets)
+            ['big']
+            >>> len(library)
+            2
         """
         kept = {
             term: set(members)
@@ -233,6 +264,22 @@ class GeneSetLibrary:
 
         Args:
             path: Destination file path.
+
+        Examples:
+            A saved library reloads identically, retrieval date included::
+
+                >>> import tempfile, os
+                >>> library = GeneSetLibrary(
+                ...     sets={"T:1": {"CD3D", "CD3E"}},
+                ...     retrieved_at="2026-01-01T00:00:00+09:00",
+                ... )
+                >>> path = os.path.join(tempfile.mkdtemp(), "sets.json")
+                >>> library.save_json(path)
+                >>> back = GeneSetLibrary.load_json(path)
+                >>> back.sets == library.sets
+                True
+                >>> back.retrieved_at
+                '2026-01-01T00:00:00+09:00'
         """
         payload = {
             "route": self.route,

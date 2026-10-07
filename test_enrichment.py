@@ -830,6 +830,29 @@ def test_input_flexibility() -> None:
         print("  - pandas not installed, skipping the DataFrame case")
 
 
+def test_doctests() -> None:
+    """Every docstring example must run and produce what it claims."""
+    section("Doctests")
+
+    import doctest
+    import importlib
+
+    modules = ["stats", "genesets", "analysis", "presets", "plot", "adapters"]
+    total = 0
+    for name in modules:
+        module = importlib.import_module(f"togoid.enrichment.{name}")
+        result = doctest.testmod(
+            module, verbose=False, optionflags=doctest.NORMALIZE_WHITESPACE
+        )
+        total += result.attempted
+        check(
+            result.failed == 0,
+            f"{name}: {result.attempted} doctest(s), {result.failed} failed",
+        )
+
+    check(total > 0, f"the modules carry {total} runnable examples in total")
+
+
 def main() -> int:
     """Run every offline test."""
     print("=" * 60)
@@ -854,6 +877,7 @@ def main() -> int:
     test_select_terms()
     test_plot_smoke()
     test_input_flexibility()
+    test_doctests()
 
     print("\n" + "=" * 60)
     print(f"Test Results: {passed} passed, {failed} failed")
