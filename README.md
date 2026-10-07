@@ -440,6 +440,54 @@ for id, annotations in result.items():
     print(f"{id}: {annotations}")
 ```
 
+### Enrichment analysis and UMAP visualisation
+
+A TogoID route that ends in an annotation dataset *is* a gene-set library: every
+term it reaches becomes a set of the input genes that map to it. The whole
+analysis is four calls.
+
+```python
+from togoid.enrichment import build_gene_sets, enrich_clusters, plot_umap_enrichment
+
+library = build_gene_sets(
+    all_marker_genes,
+    route=["ncbigene", "uniprot", "reactome_pathway"],
+)
+results = enrich_clusters(markers_per_cluster, library)
+
+fig = plot_umap_enrichment(embedding, results, top_n=3)
+fig.savefig("umap_enrichment.pdf")
+```
+
+**Only the route changes** between annotation databases — `ncbigene -> uniprot ->
+go` for GO terms, `ncbigene -> medgen -> mondo` for diseases, and so on for
+anything else TogoID can reach. Presets exist for the three above
+(`reactome_gene_sets()` and friends).
+
+![UMAP with enriched Reactome pathways](https://raw.githubusercontent.com/suimye/togoid-lib-python/docs-figures/umap_enrichment_reactome.png)
+
+The left panel is the usual cluster UMAP; the right repeats it with each
+cluster's enriched terms written around its centroid, sized by significance.
+Beside every figure the pipeline writes the same terms as a TSV, so the table and
+the picture cannot disagree.
+
+The enrichment core needs **no dependencies beyond those `togoid` already
+requires** — the hypergeometric test and the BH-FDR correction are implemented
+with `math.lgamma`. The extras add what each feature needs:
+
+```bash
+pip install "togoid[enrichment]"    # + pandas, for the to_dataframe() views
+pip install "togoid[plot]"          # + matplotlib, for the UMAP figures
+pip install "togoid[singlecell]"    # + scanpy and leidenalg, for the full example
+```
+
+[docs/enrichment.md](docs/enrichment.md) covers the rest: gene-set caching, the
+provenance headers that record when the API was queried, TSV export and notebook
+rendering, the scanpy and Seurat adapters, choosing a background, the
+`togoid enrich` subcommand, and the full API.
+A runnable pipeline on real data is in
+[examples/scRNAseq_enrichment/](examples/scRNAseq_enrichment/).
+
 ## Command-Line Interface
 
 ### Convert Command
@@ -722,372 +770,6 @@ converter.convert(ids=["1"], route=["ncbigene", "chembl_compound"])
 # Suggested routes (3 hops):
 # - ncbigene → ensembl_gene → pdb → chembl_compound
 ```
-
-## Use Case: Enrichment Analysis and UMAP Visualization
-
-`togoid.enrichment` turns ID conversion into gene-set analysis. A TogoID route
-that ends in an annotation dataset *is* a gene-set library: every term reached by
-the route becomes a set containing the input genes that map to it. From there it
-is a standard over-representation analysis, and the results can be drawn directly
-onto a single-cell embedding.
-
-The key property is that **only the route changes** between annotation databases:
-
-```python
-from togoid.enrichment import build_gene_sets
-
-build_gene_sets(genes, route=["ncbigene", "uniprot", "reactome_pathway"])  # pathways
-build_gene_sets(genes, route=["ncbigene", "uniprot", "go"])                # GO terms
-build_gene_sets(genes, route=["ncbigene", "medgen", "mondo"])              # diseases
-```
-
-Anything TogoID can reach works the same way. The enrichment core needs **no
-dependencies beyond those `togoid` already requires** — the hypergeometric test
-and the BH-FDR correction are implemented with `math.lgamma`. pandas, matplotlib
-and scanpy are optional extras, imported lazily.
-
-See [docs/enrichment.md](docs/enrichment.md) for the full manual and
-[examples/scRNAseq_enrichment/](examples/scRNAseq_enrichment/) for a runnable
-pipeline.
-
-### Installation
-
-```bash
-pip install togoid                  # gene sets, statistics, CSV/JSON output
-pip install "togoid[enrichment]"    # + pandas, for the to_dataframe() views
-pip install "togoid[plot]"          # + matplotlib, for the UMAP figures
-pip install "togoid[singlecell]"    # + scanpy and leidenalg, for the full example
-```
-
-### Quick Start
-
-```python
-from togoid.enrichment import build_gene_sets, enrich_clusters
-
-clusters = {
-    "T cells": ["CD3D", "CD3E", "CD3G", "IL7R", "LCK", "ZAP70", "CD2", "CD28", "LAT"],
-    "B cells": ["MS4A1", "CD79A", "CD79B", "CD19", "BLNK", "BANK1", "PAX5"],
-    "Myeloid": ["LYZ", "CD14", "FCGR3A", "CSF1R", "ITGAM", "TLR2", "TLR4", "S100A8"],
-}
-all_genes = sorted({gene for genes in clusters.values() for gene in genes})
-
-library = build_gene_sets(all_genes, route=["ncbigene", "uniprot", "reactome_pathway"])
-results = enrich_clusters(clusters, library, min_set_size=3)
-
-print(results.summary())
-results.to_csv("enrichment.csv")
-```
-
-```
-Cluster B cells:
-  terms tested: 6
-  significant (FDR < 0.05): 2
-    - Antigen activates B Cell Receptor (BCR) leading to generation of second messengers
-      FDR=1.40e-02  genes=4/4  fold=3.71
-
-Cluster T cells:
-  terms tested: 11
-  significant (FDR < 0.05): 5
-    - Generation of second messenger molecules
-      FDR=4.01e-03  genes=6/6  fold=2.89
-    - Translocation of ZAP-70 to Immunological synapse
-      FDR=1.05e-02  genes=5/5  fold=2.89
-```
-
-### Three Annotation Databases
-
-```python
-from togoid.enrichment import reactome_gene_sets, go_gene_sets, mondo_gene_sets
-
-# Reactome pathways: ncbigene -> uniprot -> reactome_pathway
-pathways = reactome_gene_sets(all_genes, taxonomy="9606")
-
-# GO terms: ncbigene -> uniprot -> go, filtered by aspect
-processes = go_gene_sets(all_genes, aspect="biological_process")
-functions = go_gene_sets(all_genes, aspect="molecular_function")
-
-# MONDO diseases: ncbigene -> medgen -> mondo
-diseases = mondo_gene_sets(all_genes)
-```
-
-These presets are thin wrappers over `build_gene_sets`. If you pass a route that
-does not exist, the error names the working alternatives:
-
-```
-RuntimeError: Conversion along route ncbigene -> hp_phenotype failed for all 1 batch(es).
-First error: No direct connection between 'ncbigene' and 'hp_phenotype'.
-Try one of these routes instead:
-  - ncbigene -> medgen -> hp_phenotype
-  - ncbigene -> nando -> hp_phenotype
-```
-
-### Caching Gene Sets
-
-Building a library for a few thousand genes is many API calls. Save it once and
-the analysis reproduces exactly, offline:
-
-```python
-from togoid.enrichment import GeneSetLibrary
-
-library.save_json("reactome.json")
-library = GeneSetLibrary.load_json("reactome.json")   # no network access
-```
-
-The format is shared with the R library's `togoid_save_gene_sets()`, so a
-library built in either language can be read by the other.
-
-### UMAP Visualization
-
-```python
-from togoid.enrichment import plot_umap_enrichment
-
-fig = plot_umap_enrichment(
-    embedding,          # DataFrame or dict with umap_1, umap_2, cluster
-    results,
-    top_n=3,
-    fdr_cutoff=0.05,
-    show_centroids=True,     # mark each cluster centroid
-    centroid_marker="o",     # a black filled circle
-    centroid_size=26,
-)
-fig.savefig("umap_enrichment.pdf")
-```
-
-`show_centroids=False` hides the markers by drawing them transparently. They are
-still drawn and still reserve their space, so **the labels stay exactly where
-they were** — the two figures differ only in whether you can see the dots. The
-marker itself is any matplotlib marker code — `"o"` (filled circle, the
-default), `"x"`, `"s"`, and so on — with `centroid_size` and `centroid_color` to
-match.
-
-The left panel is the usual cluster UMAP; the right repeats it with each
-cluster's enriched terms written around its centroid, sized by `-log10(p)`.
-Labels that cannot be placed without overlapping are dropped rather than drawn on
-top of each other, and the axes are widened so nothing is clipped.
-
-`embedding` is any mapping with `umap_1`, `umap_2` and `cluster` keys — plain
-lists work, so this step does not require pandas.
-
-#### Reactome pathways
-
-10x Genomics public PBMC data, 3,733 cells after QC, 13 Leiden clusters.
-
-![UMAP with enriched Reactome pathways](https://raw.githubusercontent.com/suimye/togoid-lib-python/docs-figures/umap_enrichment_reactome.png)
-
-Platelet degranulation marks the platelet cluster, MHC class II antigen
-presentation the monocyte/DC clusters, and B cell receptor signalling the B cell
-cluster.
-
-#### GO biological process
-
-![UMAP with enriched GO biological processes](https://raw.githubusercontent.com/suimye/togoid-lib-python/docs-figures/umap_enrichment_go.png)
-
-An independent confirmation of the Reactome result via a different route:
-platelet aggregation on the same platelet cluster, T cell activation on the T
-cell clusters.
-
-#### MONDO diseases
-
-![UMAP with enriched MONDO diseases](https://raw.githubusercontent.com/suimye/togoid-lib-python/docs-figures/umap_enrichment_mondo.png)
-
-Disease annotation is far sparser than pathway annotation, so only a couple of
-terms pass the size and significance filters. Shown as-is, because the contrast
-with the two figures above illustrates how coverage differs between TogoID
-targets.
-
-Full-resolution figures and the analysis notes are collected in
-[issue #1](https://github.com/suimye/togoid-lib-python/issues/1).
-
-### Tables and Notebook Display
-
-Results print as a formatted table in a console, and render as an HTML table in
-Jupyter:
-
-```python
-print(results)          # or just `results` in a notebook
-```
-
-```
-cluster  term_id        term_label                            overlap    pvalue       fdr  fold_enrichment  genes
--------  -------------  ------------------------------------  -------  --------  --------  ---------------  ---------------------------------
-0        R-HSA-6798695  Neutrophil degranulation                32/60  8.15e-20  6.85e-18             5.39  ANPEP, ASAH1, CD14, CD36 (+28)
-0        R-HSA-166058   MyD88:MAL(TIRAP) cascade initiated o…      6/7  5.02e-06  2.11e-04             8.65  CD14, CD36, IRAK3, S100A8, TLR2
-1        R-HSA-156902   Peptide chain elongation                32/70  3.75e-17  2.47e-15             4.62  EEF1A1, RPL10, RPL11 (+29)
-```
-
-The display folds `overlap_count` and `term_size` into one `k/M` column and drops
-`query_size` and `background_size`, which are constant. Every column is still
-there in the data — only the view is shortened.
-
-Writing tables out:
-
-```python
-results.to_tsv("enrichment.tsv")            # one row per term
-results.to_csv("enrichment.csv")            # same, comma-separated
-results.write_cluster_table("by_cluster.tsv", top_n=3)   # one row per cluster
-results.to_cluster_table(top_n=3)           # ... as a list of dicts
-results.to_dataframe()                      # ... as a pandas DataFrame
-```
-
-Tabs are the default for a reason: term labels routinely contain commas, which a
-CSV has to quote and some spreadsheet imports then mis-parse.
-
-To export exactly what a figure shows, pass the same filters to `select_terms()`:
-
-```python
-from togoid.enrichment import select_terms, selected_terms_table
-
-selected = select_terms(results, top_n=3, fdr_cutoff=0.05)
-rows = selected_terms_table(selected)   # flat, ordered by cluster then FDR
-```
-
-Step 4 of the example pipeline does this automatically, writing
-`<figure-name>.tsv` and `<figure-name>_by_cluster.tsv` beside every figure, so
-the table and the picture can never disagree.
-
-### Provenance: when the API was queried
-
-The TogoID API sits in front of annotation databases that are updated, so the
-same analysis run a month later can legitimately give different numbers. Every
-written table therefore carries a `#` header recording when the API was queried
-and with what options:
-
-```
-# togoid enrichment results
-# generated_at: 2026-10-06T16:31:01+09:00
-# togoid_version: 1.0.0
-# api_retrieved_at: 2026-10-06T16:29:38+09:00
-# api_base_url: https://api.togoid.dbcls.jp
-# route: ncbigene -> uniprot -> reactome_pathway
-# target_dataset: reactome_pathway
-# taxonomy: 9606
-# min_set_size: 5
-# max_set_size: 500
-# background_size: 727
-# background: library genes
-cluster	term_id	term_label	...
-```
-
-`generated_at` is when the file was written; `api_retrieved_at` is when the gene
-sets were actually fetched. They differ whenever a cached library is reused — the
-retrieval date travels with the cache, so reloading a months-old library does not
-make it look fresh.
-
-```python
-from togoid.enrichment import read_metadata
-
-read_metadata("enrichment.tsv")["api_retrieved_at"]
-```
-
-Read the data past the header with `pandas.read_csv(path, sep="\t", comment="#")`,
-or write without one via `to_tsv(path, header=False)`.
-
-Output file names are date-stamped, so re-running against an updated API adds a
-file rather than overwriting the earlier result:
-
-```
-results/03_genesets_reactome_20261006.json
-results/03_enrichment_reactome_all_20261006.tsv
-results/04_umap_enrichment_reactome_top3_20261006.pdf
-results/04_umap_enrichment_reactome_top3_20261006.tsv
-```
-
-Both example steps take `--date-suffix` (default today, `""` to omit it). Step 4
-picks the most recent step-3 file automatically and passes its `api_retrieved_at`
-into its own headers.
-
-### R 版との対応 / Equivalence with the R package
-
-The same analysis exists in [togoid-lib-r](https://github.com/togoid/togoid-lib-r).
-Both produce **identical numbers and identical files**: the same result columns,
-the same provenance header keys, the same wide-table columns, and a gene-set
-cache JSON that either language can read.
-
-The names differ because the languages differ — R exposes flat `togoid_*`
-functions where Python uses methods on objects, exactly as the existing
-`togoid_convert()` / `TogoIDConverter.convert()` pair already does.
-
-| Task | R | Python |
-|---|---|---|
-| Build gene sets | `togoid_gene_sets()` | `build_gene_sets()` |
-| Resolve labels | `togoid_map_labels()` | `map_labels_to_ids()` |
-| Presets | `togoid_reactome_gene_sets()` … | `reactome_gene_sets()` … |
-| Routes / GO aspects | `togoid_enrichment_routes()` / `togoid_go_aspects()` | `ROUTES` / `GO_ASPECTS` |
-| Column order | `togoid_enrichment_columns()` | `RESULT_COLUMNS` |
-| Enrichment | `togoid_enrich()` / `togoid_enrich_clusters()` | `enrich()` / `enrich_clusters()` |
-| Filter results | `togoid_significant()` / `togoid_top_terms()` | `.significant()` / `.top()` |
-| Summary | `togoid_enrichment_summary()` | `.summary()` |
-| Wide table | `togoid_cluster_table()` | `.to_cluster_table()` |
-| Write a table | `togoid_write_enrichment()` | `.to_tsv()` / `.to_csv()` |
-| Provenance header | `togoid_enrichment_header()` / `togoid_read_metadata()` | `.header_lines()` / `read_metadata()` |
-| Library provenance | `togoid_gene_set_provenance()` | `.provenance()` |
-| Cache | `togoid_save_gene_sets()` / `togoid_load_gene_sets()` | `.save_json()` / `.load_json()` |
-| Terms drawn on a figure | `togoid_select_terms()` / `togoid_selected_terms_table()` | `select_terms()` / `selected_terms_table()` |
-| Figures | `togoid_plot_umap_enrichment()` | `plot_umap_enrichment()` |
-| Single-cell adapters | `togoid_umap_from_seurat()` (Seurat) | `umap_dataframe_from_anndata()` (scanpy) |
-| Statistics | `togoid_hypergeometric_pvalue()` / `togoid_fdr()` | `hypergeometric_sf()` / `benjamini_hochberg()` |
-
-The two statistics functions are also reachable under the R names
-(`hypergeometric_pvalue`, `fdr`), so moving between the implementations does not
-mean learning two vocabularies.
-
-### Single-Cell Adapters
-
-The core knows nothing about scanpy or Seurat; these adapters do the translation
-and import their dependencies only when called.
-
-```python
-from togoid.enrichment.adapters import (
-    umap_dataframe_from_anndata, marker_genes_from_anndata,   # scanpy / AnnData
-    umap_dataframe_from_csv, marker_genes_from_csv,           # Seurat, via CSV
-)
-
-import scanpy as sc
-sc.tl.rank_genes_groups(adata, "leiden", method="wilcoxon")
-
-embedding = umap_dataframe_from_anndata(adata, cluster_key="leiden")
-markers   = marker_genes_from_anndata(adata, top_n=100, pval_cutoff=0.05)
-```
-
-### Enrich Command
-
-```bash
-# A single gene list
-togoid enrich --genes "CD3D,CD3E,LCK,ZAP70,LAT" --preset reactome --format summary
-
-# Per-cluster, from a CSV with cluster and gene columns
-togoid enrich --clusters-file markers.csv --preset reactome \
-              --fdr 0.05 --output enrichment.csv
-
-# Any route, not just the presets
-togoid enrich --genes-file genes.txt \
-              --route ncbigene,uniprot,reactome_pathway --output out.csv
-
-# GO, restricted to one aspect
-togoid enrich --genes-file genes.txt --preset go \
-              --go-aspect molecular_function --output go_mf.csv
-
-# Build the library once, reuse it offline
-togoid enrich --genes-file all_genes.txt --preset reactome --save-genesets sets.json
-togoid enrich --clusters-file markers.csv --load-genesets sets.json --output out.csv
-
-# Mouse instead of human
-togoid enrich --genes-file genes.txt --preset reactome --taxonomy 10090
-```
-
-### Choosing a Background
-
-This is the decision that most affects the results.
-
-- **Default** (`background=None`): every gene in the library, i.e. every gene in
-  your experiment that TogoID could annotate. This asks *which terms distinguish
-  this cluster from the rest of the experiment* — usually the right question for
-  cell types.
-- **Explicit**: pass a larger universe for the conventional *over-represented
-  relative to the genome* question. Expect many more significant hits.
-
-`enrich_clusters` shares one background across clusters, which is what makes the
-FDR values comparable between them.
 
 ## Configuration
 
