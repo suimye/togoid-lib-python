@@ -443,34 +443,37 @@ for id, annotations in result.items():
 ### Enrichment analysis and UMAP visualisation
 
 A TogoID route that ends in an annotation dataset *is* a gene-set library: every
-term it reaches becomes a set of the input genes that map to it. The whole
-analysis is four calls.
+term it reaches becomes a set of the input genes that map to it.
 
 ```python
 from togoid.enrichment import build_gene_sets, enrich_clusters, plot_umap_enrichment
 
+# Only the route changes between annotation databases:
+#   ["ncbigene", "uniprot", "reactome_pathway"]  Reactome pathways
+#   ["ncbigene", "uniprot", "go"]                GO terms
+#   ["ncbigene", "medgen", "mondo"]              MONDO diseases
+# Any other route TogoID can reach works the same way. The three above also
+# have shortcuts: reactome_gene_sets(), go_gene_sets(), mondo_gene_sets().
 library = build_gene_sets(
     all_marker_genes,
     route=["ncbigene", "uniprot", "reactome_pathway"],
 )
+
+# Hypergeometric test per cluster, Benjamini-Hochberg corrected.
 results = enrich_clusters(markers_per_cluster, library)
 
 fig = plot_umap_enrichment(embedding, results, top_n=3)
 fig.savefig("umap_enrichment.pdf")
-```
 
-**Only the route changes** between annotation databases — `ncbigene -> uniprot ->
-go` for GO terms, `ncbigene -> medgen -> mondo` for diseases, and so on for
-anything else TogoID can reach. Presets exist for the three above
-(`reactome_gene_sets()` and friends).
+# The same terms as a table: these filters are the ones the figure used, so the
+# two cannot disagree.
+results.significant(0.05).top(3).to_tsv("umap_enrichment.tsv")
+```
 
 ![UMAP with enriched Reactome pathways](https://raw.githubusercontent.com/suimye/togoid-lib-python/docs-figures/umap_enrichment_reactome.png)
 
-Beside every figure the pipeline writes the same terms as a TSV, so the table and
-the picture cannot disagree.
-
-[docs/enrichment.md](docs/enrichment.md) has the rest, and
-[examples/scRNAseq_enrichment/](examples/scRNAseq_enrichment/) has a runnable
+See [docs/enrichment.md](docs/enrichment.md), and
+[examples/scRNAseq_enrichment/](examples/scRNAseq_enrichment/) for a runnable
 pipeline on real data.
 
 ## Command-Line Interface
