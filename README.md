@@ -466,27 +466,12 @@ anything else TogoID can reach. Presets exist for the three above
 
 ![UMAP with enriched Reactome pathways](https://raw.githubusercontent.com/suimye/togoid-lib-python/docs-figures/umap_enrichment_reactome.png)
 
-The left panel is the usual cluster UMAP; the right repeats it with each
-cluster's enriched terms written around its centroid, sized by significance.
 Beside every figure the pipeline writes the same terms as a TSV, so the table and
 the picture cannot disagree.
 
-The enrichment core needs **no dependencies beyond those `togoid` already
-requires** — the hypergeometric test and the BH-FDR correction are implemented
-with `math.lgamma`. The extras add what each feature needs:
-
-```bash
-pip install "togoid[enrichment]"    # + pandas, for the to_dataframe() views
-pip install "togoid[plot]"          # + matplotlib, for the UMAP figures
-pip install "togoid[singlecell]"    # + scanpy and leidenalg, for the full example
-```
-
-[docs/enrichment.md](docs/enrichment.md) covers the rest: gene-set caching, the
-provenance headers that record when the API was queried, TSV export and notebook
-rendering, the scanpy and Seurat adapters, choosing a background, the
-`togoid enrich` subcommand, and the full API.
-A runnable pipeline on real data is in
-[examples/scRNAseq_enrichment/](examples/scRNAseq_enrichment/).
+[docs/enrichment.md](docs/enrichment.md) has the rest, and
+[examples/scRNAseq_enrichment/](examples/scRNAseq_enrichment/) has a runnable
+pipeline on real data.
 
 ## Command-Line Interface
 
